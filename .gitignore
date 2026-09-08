@@ -1,0 +1,29 @@
+# ── Secrets ───────────────────────────────────────────────
+# Never commit real credentials. Only .env.example is tracked.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Legacy/stray secret files
+config
+prototype/config
+secrets.*
+
+# ── Dependencies & build output ───────────────────────────
+node_modules/
+dist/
+build/
+.cache/
+
+# ── Editor / OS ───────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs ──────────────────────────────────────────────────
+*.log
+npm-debug.log*
