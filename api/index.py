@@ -252,6 +252,10 @@ def _cookie(token, environ, clear=False):
 
 def _health():
     """Diagnostics that work even when the database does not."""
+    # Env-var KEY NAMES only -- never values. If DATABASE_URL was set under a
+    # different name, or scoped to the wrong environment, this shows it.
+    db_like = sorted(k for k in os.environ
+                     if any(w in k.upper() for w in ("DATABASE", "POSTGRES", "PG", "NEON")))
     info = {
         "ok": False,
         "python": sys.version.split()[0],
@@ -260,6 +264,11 @@ def _health():
         "database_url_set": bool(DATABASE_URL),
         "database_url_pooled": "-pooler" in DATABASE_URL if DATABASE_URL else None,
         "permissive_mode": PERMISSIVE_MODE,
+        # which Vercel environment is actually serving this request
+        "vercel_env": os.environ.get("VERCEL_ENV"),
+        "vercel_region": os.environ.get("VERCEL_REGION"),
+        "deployed_commit": (os.environ.get("VERCEL_GIT_COMMIT_SHA") or "")[:7] or None,
+        "db_env_keys_visible": db_like,
     }
     if psycopg2 is None or not DATABASE_URL:
         info["hint"] = ("Install/redeploy requirements.txt" if psycopg2 is None
