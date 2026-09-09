@@ -1,5 +1,5 @@
 /* ============================================================
-   Cuspid prototype — hash-routed SPA, no build step, no backend.
+   Dental Info prototype — hash-routed SPA, no build step, no backend.
    Views: #/browse  #/case/:id  #/contribute  #/verify
    ============================================================ */
 
@@ -31,7 +31,6 @@ function toast(msg) {
 const ICON = {
   check:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m20 6-11 11-5-5"/></svg>',
   eye:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>',
-  book:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12v18z"/><path d="M5 17h14"/></svg>',
   msg:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-11a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/></svg>',
   image:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>',
   video:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m10 9 5 3-5 3z"/><rect x="2" y="4" width="20" height="16" rx="3"/></svg>',
@@ -43,12 +42,21 @@ const ICON = {
   chev:   '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>',
   left:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m14 6-6 6 6 6"/></svg>',
   bookmk: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h12v17l-6-4-6 4z"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
 };
 
 const verifiedBadge = () => `<span class="verified">${ICON.check}Verified</span>`;
 const canPost = () => SESSION.role === "contributor";
 
-/* All distinct tools, for the filter rail */
+/* Difficulty as an ordinal 3-step meter. The text label is always
+   rendered alongside, so the hue never carries the meaning alone. */
+function diffMeter(level) {
+  return `<span class="diff" data-level="${level}" title="${level} difficulty">
+    <span class="diff-track"><i class="diff-seg"></i><i class="diff-seg"></i><i class="diff-seg"></i></span>
+    <span class="diff-label">${esc(level)}</span>
+  </span>`;
+}
+
 const ALL_TOOLS = [...new Set(CASES.flatMap((c) => c.tools))].sort();
 
 /* ── Filtering ───────────────────────────────────────────── */
@@ -61,10 +69,11 @@ function procLabel(id) {
 }
 const countFor = (id) => CASES.filter((c) => c.procedure === id).length;
 const countForGroup = (g) => g.children.reduce((n, c) => n + countFor(c.id), 0);
+const isFiltered = () => !!(state.procedure || state.query.trim() || state.complications.size || state.tools.size);
 
 function filteredCases() {
   const q = state.query.trim().toLowerCase();
-  let out = CASES.filter((c) => {
+  const out = CASES.filter((c) => {
     if (state.procedure && c.procedure !== state.procedure) return false;
     if (state.complications.size && !c.complications.some((x) => state.complications.has(x))) return false;
     if (state.tools.size && !c.tools.some((x) => state.tools.has(x))) return false;
@@ -79,53 +88,117 @@ function filteredCases() {
   return out.sort(by[state.sort]);
 }
 
+/* ── Hero ────────────────────────────────────────────────── */
+/* Stat tiles: label + value only, no plot — so no hover layer needed.
+   Values are derived from the real data set, not invented. */
+function heroStats() {
+  const contributors = new Set(CASES.map((c) => c.author.name)).size;
+  const countries = new Set(CASES.map((c) => c.author.location.split(",").pop().trim())).size;
+  const procedures = PROCEDURES.reduce((n, g) => n + g.children.length, 0);
+  return [
+    { label: "Documented cases", value: CASES.length },
+    { label: "Verified contributors", value: contributors },
+    { label: "Procedure categories", value: procedures },
+    { label: "Countries represented", value: countries },
+  ];
+}
+
+function heroFull() {
+  const stats = heroStats();
+  return el(`<section class="hero">
+    <div class="hero-inner">
+      <span class="hero-eyebrow">
+        <span class="vpill">${ICON.check}</span>
+        Every contributor is a license-verified dentist
+      </span>
+      <h1>The cases that <span class="grad">go wrong</span>,<br>written up properly.</h1>
+      <p>A structured, procedure-indexed record of real complications — what happened,
+         which tools were used, and exactly how it was resolved. Not a forum thread.</p>
+    </div>
+    <div class="hero-cta">
+      <a class="btn btn-light" href="#/contribute">${ICON.plus} Document a case</a>
+      <button class="btn btn-light" id="heroSearch">${ICON.search} Search the library</button>
+    </div>
+    <div class="kpi-row">
+      ${stats.map((s) => `<div class="kpi">
+        <span class="kpi-val">${s.value}</span>
+        <span class="kpi-label">${esc(s.label)}</span>
+      </div>`).join("")}
+    </div>
+  </section>`);
+}
+
+function heroCompact(p, count) {
+  const bits = [];
+  if (state.query.trim()) bits.push(`matching “${esc(state.query.trim())}”`);
+  if (state.complications.size) bits.push(`${state.complications.size} complication filter${state.complications.size > 1 ? "s" : ""}`);
+  if (state.tools.size) bits.push(`${state.tools.size} tool filter${state.tools.size > 1 ? "s" : ""}`);
+  return el(`<section class="hero compact">
+    <div class="hero-inner">
+      ${p ? `<p class="hero-eyebrow" style="margin-bottom:14px">${esc(p.group)}</p>` : ""}
+      <h1>${p ? esc(p.leaf) : "Search results"}</h1>
+      <p>${count} case${count === 1 ? "" : "s"}${bits.length ? " · " + bits.join(" · ") : ""}</p>
+    </div>
+    <div class="hero-cta">
+      <button class="btn btn-light btn-sm" id="clearAll">Clear all filters</button>
+    </div>
+  </section>`);
+}
+
 /* ── Browse view ─────────────────────────────────────────── */
 function renderBrowse() {
   const results = filteredCases();
   const p = state.procedure ? procLabel(state.procedure) : null;
 
-  const view = el(`<div class="layout">
-    <aside class="rail rail-left">
-      <p class="rail-title">Procedures</p>
-      <div id="taxonomy"></div>
-      <div class="rail-divider"></div>
-      <button class="btn btn-primary btn-block btn-sm" id="newCaseBtn">${ICON.plus} Document a case</button>
-    </aside>
+  const view = el(`<div>
+    <div id="heroSlot"></div>
+    <div class="layout">
+      <aside class="rail rail-left">
+        <p class="rail-title">Procedures</p>
+        <div id="taxonomy"></div>
+        <div class="rail-divider"></div>
+        <button class="btn btn-primary btn-block btn-sm" id="newCaseBtn">${ICON.plus} Document a case</button>
+      </aside>
 
-    <section>
-      <div class="page-head">
-        ${p ? `<p class="crumbs">Procedures › ${esc(p.group)}</p>` : ""}
-        <h1>${p ? esc(p.leaf) : "All documented cases"}</h1>
-        <p class="sub">${p
-          ? "Uncommon and difficult cases in this procedure, contributed by verified dentists."
-          : "A structured, procedure-indexed record of real complications and how they were resolved."}</p>
-      </div>
-      <div class="results-bar">
-        <span class="results-count"><b>${results.length}</b> case${results.length === 1 ? "" : "s"}${state.query ? ` for “${esc(state.query)}”` : ""}</span>
-        <div class="sort-wrap">
-          <span>Sort</span>
-          <select id="sortSelect">
-            <option value="recent">Most recent</option>
-            <option value="reads">Most read</option>
-            <option value="saves">Most saved</option>
-          </select>
+      <section>
+        <div class="results-bar">
+          <span class="results-count"><b>${results.length}</b> case${results.length === 1 ? "" : "s"}</span>
+          <div class="sort-wrap">
+            <span>Sort</span>
+            <select id="sortSelect" aria-label="Sort cases">
+              <option value="recent">Most recent</option>
+              <option value="reads">Most read</option>
+              <option value="saves">Most saved</option>
+            </select>
+          </div>
         </div>
-      </div>
-      <div class="case-list" id="caseList"></div>
-    </section>
+        <div class="case-list" id="caseList"></div>
+      </section>
 
-    <aside class="rail rail-right">
-      <div class="filter-block">
-        <p class="rail-title">Complication</p>
-        <div class="chips" id="compChips"></div>
-      </div>
-      <div class="filter-block">
-        <p class="rail-title">Tools &amp; materials</p>
-        <div class="chips" id="toolChips"></div>
-      </div>
-      <button class="clear-link" id="clearFilters">Clear all filters</button>
-    </aside>
+      <aside class="rail rail-right">
+        <div class="filter-block">
+          <p class="rail-title">Complication</p>
+          <div class="chips" id="compChips"></div>
+        </div>
+        <div class="filter-block">
+          <p class="rail-title">Tools &amp; materials</p>
+          <div class="chips" id="toolChips"></div>
+        </div>
+        <button class="clear-link" id="clearFilters">Clear all filters</button>
+      </aside>
+    </div>
   </div>`);
+
+  /* hero */
+  const slot = $("#heroSlot", view);
+  slot.appendChild(isFiltered() ? heroCompact(p, results.length) : heroFull());
+  const clearAll = () => {
+    state.complications.clear(); state.tools.clear();
+    state.procedure = null; state.query = "";
+    $("#globalSearch").value = ""; render();
+  };
+  const ca = $("#clearAll", view);   if (ca) ca.onclick = clearAll;
+  const hs = $("#heroSearch", view); if (hs) hs.onclick = () => $("#globalSearch").focus();
 
   /* taxonomy */
   const tax = $("#taxonomy", view);
@@ -133,10 +206,10 @@ function renderBrowse() {
     const openGroup = g.children.some((c) => c.id === state.procedure);
     const grp = el(`<div class="tax-group${openGroup ? " open" : ""}">
       <button class="tax-parent">${ICON.chev}<span>${esc(g.label)}</span><span class="cnt">${countForGroup(g)}</span></button>
-      <div class="tax-children"></div>
+      <div class="tax-children"><div></div></div>
     </div>`);
     $(".tax-parent", grp).onclick = () => grp.classList.toggle("open");
-    const kids = $(".tax-children", grp);
+    const kids = $(".tax-children > div", grp);
     g.children.forEach((c) => {
       const b = el(`<button class="tax-child${state.procedure === c.id ? " active" : ""}">
         <span>${esc(c.label)}</span><span class="cnt">${countFor(c.id)}</span></button>`);
@@ -157,34 +230,34 @@ function renderBrowse() {
   chipRow($("#compChips", view), COMPLICATIONS, state.complications);
   chipRow($("#toolChips", view), ALL_TOOLS.slice(0, 14), state.tools);
 
-  /* results */
+  /* results, with a staggered entrance */
   const list = $("#caseList", view);
   if (!results.length) {
     list.appendChild(el(`<div class="empty"><h3>No cases match these filters</h3>
       <p>Try clearing a filter or broadening the search.</p></div>`));
   } else {
-    results.forEach((c) => list.appendChild(caseCard(c)));
+    results.forEach((c, i) => {
+      const card = caseCard(c);
+      card.style.animationDelay = Math.min(i * 45, 360) + "ms";
+      list.appendChild(card);
+    });
   }
 
-  /* controls */
   const sort = $("#sortSelect", view);
   sort.value = state.sort;
   sort.onchange = (e) => { state.sort = e.target.value; render(); };
-  $("#clearFilters", view).onclick = () => {
-    state.complications.clear(); state.tools.clear();
-    state.procedure = null; state.query = ""; $("#globalSearch").value = ""; render();
-  };
+  $("#clearFilters", view).onclick = clearAll;
   $("#newCaseBtn", view).onclick = () => { location.hash = "#/contribute"; };
 
   return view;
 }
 
 function caseCard(c) {
-  const a = el(`<a class="case-card" href="#/case/${c.id}">
+  return el(`<a class="case-card" href="#/case/${c.id}">
     <div class="case-meta-top">
       <span class="tag tag-proc">${esc(c.procedurePath)}</span>
       ${c.complications.map((x) => `<span class="tag tag-comp">${esc(x)}</span>`).join("")}
-      <span class="diff diff-${c.difficulty}">${c.difficulty}</span>
+      ${diffMeter(c.difficulty)}
     </div>
     <h3 class="case-title">${esc(c.title)}</h3>
     <p class="case-summary">${esc(c.summary)}</p>
@@ -204,7 +277,6 @@ function caseCard(c) {
       </div>
     </div>
   </a>`);
-  return a;
 }
 
 /* ── Case detail view ────────────────────────────────────── */
@@ -216,19 +288,21 @@ function renderCase(id) {
     <a class="back-link" href="#/browse">${ICON.left} All cases</a>
     <div class="detail">
       <article>
-        <div class="case-meta-top">
-          <span class="tag tag-proc">${esc(c.procedurePath)}</span>
-          ${c.complications.map((x) => `<span class="tag tag-comp">${esc(x)}</span>`).join("")}
-          <span class="diff diff-${c.difficulty}">${c.difficulty} difficulty</span>
-        </div>
-        <h1>${esc(c.title)}</h1>
-        <div class="detail-byline">
-          <span class="av byline-av" style="width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:var(--teal-100);color:var(--teal-800);font-size:13px;font-weight:700">${initials(c.author.name)}</span>
-          <div>
-            <div class="byline-name">${esc(c.author.name)} ${c.author.verified ? verifiedBadge() : ""}</div>
-            <div class="byline-sub">${esc(c.author.credential)} · ${esc(c.author.location)} · ${fmtDate(c.date)}</div>
+        <header class="detail-hero">
+          <div class="case-meta-top">
+            <span class="tag tag-proc">${esc(c.procedurePath)}</span>
+            ${c.complications.map((x) => `<span class="tag">${esc(x)}</span>`).join("")}
+            ${diffMeter(c.difficulty)}
           </div>
-        </div>
+          <h1>${esc(c.title)}</h1>
+          <div class="detail-byline">
+            <span class="av">${initials(c.author.name)}</span>
+            <div>
+              <div class="byline-name">${esc(c.author.name)} ${c.author.verified ? verifiedBadge() : ""}</div>
+              <div class="byline-sub">${esc(c.author.credential)} · ${esc(c.author.location)} · ${fmtDate(c.date)}</div>
+            </div>
+          </div>
+        </header>
 
         <div class="section">
           <p class="section-label">Presentation</p>
@@ -246,9 +320,9 @@ function renderCase(id) {
           <p class="section-label">Outcome</p>
           <div class="outcome"><p>${esc(c.outcome)}</p></div>
         </div>
-        <div class="section callout">
+        <div class="section">
           <p class="section-label">Clinical takeaways</p>
-          <ul>${c.takeaways.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>
+          <div class="callout"><ul>${c.takeaways.map((t) => `<li>${esc(t)}</li>`).join("")}</ul></div>
         </div>
         ${c.media.length ? `<div class="section">
           <p class="section-label">Media (${c.media.length})</p>
@@ -267,13 +341,13 @@ function renderCase(id) {
                     ${m.verified ? verifiedBadge() : ""}<span class="dt">${fmtDate(m.date)}</span></div>
                   <div class="comment-text">${esc(m.text)}</div>
                 </div></div>`).join("")
-            : `<p style="color:var(--ink-400);font-size:13.5px">No discussion yet.</p>`}
-          <div style="margin-top:16px">
+            : `<p style="color:var(--ink-4);font-size:13.5px">No discussion yet.</p>`}
+          <div style="margin-top:18px">
             ${canPost()
               ? `<button class="btn btn-ghost btn-sm" id="addComment">${ICON.msg} Add a clinical comment</button>`
-              : `<div style="display:flex;align-items:center;gap:9px;color:var(--ink-400);font-size:13px">
-                   <span style="width:15px;height:15px;display:inline-block">${ICON.lock}</span>
-                   Only verified dentists can comment. <a href="#/verify" style="color:var(--teal-700);font-weight:600">Get verified</a>
+              : `<div style="display:flex;align-items:center;gap:9px;color:var(--ink-4);font-size:13px">
+                   <span style="width:15px;height:15px;display:inline-block;flex-shrink:0">${ICON.lock}</span>
+                   Only verified dentists can comment. <a href="#/verify" style="color:var(--accent);font-weight:600">Get verified</a>
                  </div>`}
           </div>
         </div>
@@ -293,12 +367,12 @@ function renderCase(id) {
             <div class="kv-row"><span class="k">Case ID</span><span class="v">${esc(c.id.toUpperCase())}</span></div>
             <div class="kv-row"><span class="k">Procedure</span><span class="v">${esc(c.procedurePath)}</span></div>
             <div class="kv-row"><span class="k">Published</span><span class="v">${fmtDate(c.date)}</span></div>
-            <div class="kv-row"><span class="k">Reads</span><span class="v">${fmtNum(c.reads)} · ${fmtNum(c.saves)} saves</span></div>
+            <div class="kv-row"><span class="k">Engagement</span><span class="v">${fmtNum(c.reads)} reads · ${fmtNum(c.saves)} saves</span></div>
           </div>
         </div>
-        <div class="panel" style="background:var(--teal-50);border-color:var(--teal-100)">
-          <h4 style="color:var(--teal-700)">Peer-contributed content</h4>
-          <p style="margin:0;font-size:12.5px;color:var(--ink-700);line-height:1.55">
+        <div class="panel" style="background:var(--accent-wash);border-color:var(--t-300)">
+          <h4 style="color:var(--accent-ink)">Peer-contributed content</h4>
+          <p style="margin:0;font-size:12.5px;color:var(--ink-2);line-height:1.6">
             Written by a verified dentist for professional discussion. Not a clinical guideline and
             not a substitute for your own judgement.</p>
         </div>
@@ -316,25 +390,27 @@ function renderCase(id) {
 function renderContribute() {
   if (!canPost()) {
     const pending = SESSION.role === "pending";
-    const gate = el(`<div class="gate">
+    return el(`<div class="gate">
       <div class="gate-icon">${pending ? ICON.clock : ICON.lock}</div>
       <h2>${pending ? "Your verification is still in review" : "Only verified dentists can contribute"}</h2>
       <p>${pending
         ? "We are cross-checking your license against the issuing board. You will get posting rights as soon as it clears — usually within two business days."
-        : "Anyone can read Cuspid, but posting a case requires a verified dental license. Verification takes a few minutes to submit."}</p>
+        : "Anyone can read Dental Info, but posting a case requires a verified dental license. Verification takes a few minutes to submit."}</p>
       <div class="gate-actions">
         <a class="btn btn-primary" href="#/verify">${ICON.shield} ${pending ? "View verification status" : "Start verification"}</a>
         <a class="btn btn-ghost" href="#/browse">Keep browsing</a>
       </div>
     </div>`);
-    return gate;
   }
 
   const view = el(`<div class="form-wrap">
-    <div class="page-head">
-      <h1>Document a case</h1>
-      <p class="sub">Structured entry — this is what makes cases searchable later. Aim for what you would want to read at 8am before a difficult appointment.</p>
-    </div>
+    <section class="hero compact" style="margin-bottom:24px">
+      <div class="hero-inner">
+        <h1>Document a case</h1>
+        <p>Structured entry is what makes cases searchable later. Aim for what you would
+           want to read at 8am before a difficult appointment.</p>
+      </div>
+    </section>
     <div class="form-steps">
       <div class="form-step on">1 · Classification</div>
       <div class="form-step on">2 · Clinical narrative</div>
@@ -364,6 +440,13 @@ function renderContribute() {
         </div>
       </div>
       <div class="field">
+        <label for="f-diff">Difficulty</label>
+        <select id="f-diff">
+          <option>Low</option><option selected>Medium</option><option>High</option>
+        </select>
+        <p class="hint">How much judgement or specialist kit this needed beyond routine practice.</p>
+      </div>
+      <div class="field">
         <label for="f-tools">Tools &amp; materials used</label>
         <input id="f-tools" type="text" placeholder="Comma separated — e.g. ProTaper Gold F2, ultrasonic tip, 17% EDTA">
         <p class="hint">Brand and size where it mattered to the outcome.</p>
@@ -378,17 +461,17 @@ function renderContribute() {
       </div>
       <div class="field">
         <label for="f-res">How you resolved it</label>
-        <textarea id="f-res" style="min-height:130px" placeholder="One step per line. Include what you tried that did not work."></textarea>
+        <textarea id="f-res" style="min-height:132px" placeholder="One step per line. Include what you tried that did not work."></textarea>
       </div>
       <div class="field">
         <label for="f-out">Outcome &amp; follow-up</label>
-        <textarea id="f-out" style="min-height:74px" placeholder="Review interval and what you found."></textarea>
+        <textarea id="f-out" style="min-height:76px" placeholder="Review interval and what you found."></textarea>
       </div>
       <div class="field">
         <label>Supporting media</label>
         <div class="dropzone">${ICON.upload}
           <div>Drop radiographs, clinical photos or video here</div>
-          <div class="hint" style="margin-top:5px">Faces and identifiers are auto-flagged before publishing</div>
+          <div class="hint" style="margin-top:6px">Faces and identifiers are auto-flagged before publishing</div>
         </div>
       </div>
       <div class="form-actions">
@@ -427,10 +510,13 @@ function renderVerify() {
   const stepText = { done: "Complete", pending: "In progress", todo: "Not started" };
 
   const view = el(`<div class="verify-wrap">
-    <div class="page-head">
-      <h1>Contributor verification</h1>
-      <p class="sub">Every contributor on Cuspid is a licensed dentist, checked against the issuing board. This is what makes the content worth reading.</p>
-    </div>
+    <section class="hero compact" style="margin-bottom:24px">
+      <div class="hero-inner">
+        <h1>Contributor verification</h1>
+        <p>Every contributor on Dental Info is a licensed dentist, checked against the issuing
+           board. This is what makes the content worth reading.</p>
+      </div>
+    </section>
 
     <div class="status-banner ${banner.cls}">
       <span class="si">${banner.icon}</span>
@@ -481,10 +567,10 @@ function render() {
   host.innerHTML = "";
 
   let node, navKey;
-  if (hash.startsWith("#/case/"))          { node = renderCase(hash.slice(7));  navKey = "#/browse"; }
-  else if (hash.startsWith("#/contribute")){ node = renderContribute();          navKey = "#/contribute"; }
-  else if (hash.startsWith("#/verify"))    { node = renderVerify();              navKey = "#/verify"; }
-  else                                     { node = renderBrowse();              navKey = "#/browse"; }
+  if (hash.startsWith("#/case/"))           { node = renderCase(hash.slice(7)); navKey = "#/browse"; }
+  else if (hash.startsWith("#/contribute")) { node = renderContribute();        navKey = "#/contribute"; }
+  else if (hash.startsWith("#/verify"))     { node = renderVerify();            navKey = "#/verify"; }
+  else                                      { node = renderBrowse();            navKey = "#/browse"; }
 
   host.appendChild(node);
   document.querySelectorAll(".topnav-link").forEach((a) => {
@@ -493,18 +579,32 @@ function render() {
   if (!hash.startsWith("#/case/")) window.scrollTo(0, 0);
 }
 
+/* ── Theme ───────────────────────────────────────────────── */
+function currentTheme() {
+  const stamped = document.documentElement.getAttribute("data-theme");
+  if (stamped) return stamped;
+  return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+$("#themeToggle").addEventListener("click", () => {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  try { localStorage.setItem("dentalinfo-theme", next); } catch (e) {}
+  toast(next === "dark" ? "Dark theme" : "Light theme");
+});
+
 /* ── Global wiring ───────────────────────────────────────── */
 window.addEventListener("hashchange", render);
 
 $("#globalSearch").addEventListener("input", (e) => {
   state.query = e.target.value;
-  if (!location.hash.startsWith("#/browse")) { location.hash = "#/browse"; return; }
+  if (!location.hash.startsWith("#/browse") && location.hash !== "") { location.hash = "#/browse"; return; }
   render();
   $("#globalSearch").focus();
 });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "/" && document.activeElement.tagName !== "INPUT" && document.activeElement.tagName !== "TEXTAREA") {
+  const tag = document.activeElement.tagName;
+  if (e.key === "/" && tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT") {
     e.preventDefault(); $("#globalSearch").focus();
   }
   if (e.key === "Escape" && document.activeElement === $("#globalSearch")) {

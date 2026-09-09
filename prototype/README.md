@@ -1,4 +1,4 @@
-# Cuspid — clickable prototype
+# Dental Info — clickable prototype
 
 A **UI/UX prototype only**. No backend, no build step, no dependencies — mock data
 lives in `data.js`. The point is to see whether the structure of the product works
