@@ -152,11 +152,11 @@ function filteredCases() {
   const q = state.query.trim().toLowerCase();
   const out = CASES.filter((c) => {
     if (state.procedure && c.procedure !== state.procedure) return false;
-    if (state.complications.size && !c.complications.some((x) => state.complications.has(x))) return false;
-    if (state.tools.size && !c.tools.some((x) => state.tools.has(x))) return false;
+    if (state.complications.size && !(c.complications || []).some((x) => state.complications.has(x))) return false;
+    if (state.tools.size && !(c.tools || []).some((x) => state.tools.has(x))) return false;
     if (!q) return true;
     const hay = [c.title, c.summary, c.presentation, c.unusual, c.procedurePath,
-                 c.complications.join(" "), c.tools.join(" "), c.author.name].join(" ").toLowerCase();
+                 (c.complications || []).join(" "), (c.tools || []).join(" "), c.author.name].join(" ").toLowerCase();
     return q.split(/\s+/).every((w) => hay.includes(w));
   });
   const by = { recent: (a, b) => b.date.localeCompare(a.date),
@@ -333,7 +333,7 @@ function caseCard(c) {
   return el(`<a class="case-card" href="#/case/${c.id}">
     <div class="case-meta-top">
       <span class="tag tag-proc">${esc(c.procedurePath)}</span>
-      ${c.complications.map((x) => `<span class="tag tag-comp">${esc(x)}</span>`).join("")}
+      ${(c.complications || []).map((x) => `<span class="tag tag-comp">${esc(x)}</span>`).join("")}
       ${diffMeter(c.difficulty)}
     </div>
     <h3 class="case-title">${esc(c.title)}</h3>
@@ -349,8 +349,8 @@ function caseCard(c) {
       <div class="stat-row">
         <span>${ICON.eye}${fmtNum(c.reads)}</span>
         <span>${ICON.bookmk}${fmtNum(c.saves)}</span>
-        <span>${ICON.msg}${c.comments.length}</span>
-        ${c.media.length ? `<span>${ICON.image}${c.media.length}</span>` : ""}
+        <span>${ICON.msg}${(c.comments || []).length}</span>
+        ${(c.media || []).length ? `<span>${ICON.image}${c.media.length}</span>` : ""}
       </div>
     </div>
   </a>`);
@@ -368,7 +368,7 @@ function renderCase(id) {
         <header class="detail-hero">
           <div class="case-meta-top">
             <span class="tag tag-proc">${esc(c.procedurePath)}</span>
-            ${c.complications.map((x) => `<span class="tag">${esc(x)}</span>`).join("")}
+            ${(c.complications || []).map((x) => `<span class="tag">${esc(x)}</span>`).join("")}
             ${diffMeter(c.difficulty)}
           </div>
           <h1>${esc(c.title)}</h1>
@@ -391,7 +391,7 @@ function renderCase(id) {
         </div>
         <div class="section">
           <p class="section-label">How it was resolved</p>
-          <ol class="steps">${c.resolution.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
+          <ol class="steps">${(c.resolution || []).map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
         </div>
         <div class="section">
           <p class="section-label">Outcome</p>
@@ -399,18 +399,18 @@ function renderCase(id) {
         </div>
         <div class="section">
           <p class="section-label">Clinical takeaways</p>
-          <div class="callout"><ul>${c.takeaways.map((t) => `<li>${esc(t)}</li>`).join("")}</ul></div>
+          <div class="callout"><ul>${(c.takeaways || []).map((t) => `<li>${esc(t)}</li>`).join("")}</ul></div>
         </div>
-        ${c.media.length ? `<div class="section">
+        ${(c.media || []).length ? `<div class="section">
           <p class="section-label">Media (${c.media.length})</p>
-          <div class="media-grid">${c.media.map((m) => `<div class="media-item">
+          <div class="media-grid">${(c.media || []).map((m) => `<div class="media-item">
             <span class="badge">${m.type}</span>${m.type === "video" ? ICON.video : ICON.image}<span>${esc(m.label)}</span>
           </div>`).join("")}</div>
         </div>` : ""}
 
         <div class="section">
-          <p class="section-label">Peer discussion (${c.comments.length})</p>
-          ${c.comments.length
+          <p class="section-label">Peer discussion (${(c.comments || []).length})</p>
+          ${(c.comments || []).length
             ? c.comments.map((m) => `<div class="comment">
                 <span class="av">${initials(m.author)}</span>
                 <div class="comment-body">
@@ -444,7 +444,7 @@ function renderCase(id) {
         </div>
         <div class="panel">
           <h4>Tools &amp; materials used</h4>
-          <div class="tool-list">${c.tools.map((t) => `<span class="tag tag-tool">${esc(t)}</span>`).join("")}</div>
+          <div class="tool-list">${(c.tools || []).map((t) => `<span class="tag tag-tool">${esc(t)}</span>`).join("")}</div>
         </div>
         <div class="panel">
           <h4>Case record</h4>
@@ -907,11 +907,30 @@ function render() {
   renderAuthSlot();
 
   let node, navKey;
-  if (hash.startsWith("#/login"))           { node = renderLogin();            navKey = null; }
-  else if (hash.startsWith("#/case/"))      { node = renderCase(hash.slice(7)); navKey = "#/browse"; }
-  else if (hash.startsWith("#/contribute")) { node = renderContribute();        navKey = "#/contribute"; }
-  else if (hash.startsWith("#/verify"))     { node = renderVerify();            navKey = "#/verify"; }
-  else                                      { node = renderBrowse();            navKey = "#/browse"; }
+  try {
+    if (hash.startsWith("#/login"))           { node = renderLogin();            navKey = null; }
+    else if (hash.startsWith("#/case/"))      { node = renderCase(hash.slice(7)); navKey = "#/browse"; }
+    else if (hash.startsWith("#/contribute")) { node = renderContribute();        navKey = "#/contribute"; }
+    else if (hash.startsWith("#/verify"))     { node = renderVerify();            navKey = "#/verify"; }
+    else                                      { node = renderBrowse();            navKey = "#/browse"; }
+  } catch (err) {
+    // Without this, one unexpected field shape blanks the entire page with no
+    // clue why — which is exactly how the missing `comments` field presented.
+    console.error("Render failed:", err);
+    node = el(`<div class="gate">
+      <div class="gate-icon">${ICON.lock}</div>
+      <h2>Something failed to render</h2>
+      <p>The data loaded, but this view could not be drawn. This is a bug, not a
+         configuration problem.</p>
+      <p style="font-size:12.5px;color:var(--ink-4);word-break:break-word">
+        <b>${esc(err && err.name || "Error")}:</b> ${esc(err && err.message || String(err))}</p>
+      <div class="gate-actions">
+        <a class="btn btn-primary" href="#/browse">Back to browse</a>
+        <button class="btn btn-ghost" onclick="location.reload()">Reload</button>
+      </div>
+    </div>`);
+    navKey = null;
+  }
 
   host.appendChild(node);
   document.querySelectorAll(".topnav-link").forEach((a) => {

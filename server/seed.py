@@ -142,6 +142,43 @@ def seed_cases(conn, owner_id: str) -> int:
     return created
 
 
+def seed_comments(conn) -> int:
+    """Import the peer discussion attached to the example cases.
+
+    Comment ids are derived from the case id, so re-running is idempotent.
+    """
+    if not SEED_CASES.exists():
+        return 0
+    cases = json.loads(SEED_CASES.read_text(encoding="utf-8"))
+    made = 0
+    for case in cases:
+        for i, m in enumerate(case.get("comments") or []):
+            cid = f"{case['id']}-c{i}"
+            if conn.execute("SELECT 1 FROM comments WHERE id = ?", (cid,)).fetchone():
+                continue
+            name = m.get("author") or "Unknown"
+            email = (name.lower().replace("dr. ", "").replace(" ", ".")
+                     + "@dentalinfo.test")
+            row = store.get_user_by_email(conn, email)
+            if row is None:
+                author_id = store.create_user(
+                    conn, email=email, name=name,
+                    password=store.secrets.token_urlsafe(24),
+                    role="contributor",
+                    verification_status="verified" if m.get("verified") else "unverified",
+                )
+            else:
+                author_id = row["id"]
+            conn.execute(
+                "INSERT INTO comments (id,post_id,author_id,body,created_at) "
+                "VALUES (?,?,?,?,?)",
+                (cid, case["id"], author_id, m["text"],
+                 (m.get("date") or "") + "T12:00:00+00:00"))
+            made += 1
+    print(f"  imported comments {made}")
+    return made
+
+
 def write_accounts_file():
     lines = [
         "=" * 66,
@@ -205,6 +242,7 @@ def main():
     with store.connect() as conn:
         ids = seed_accounts(conn)
         seed_cases(conn, ids.get("admin@dentalinfo.test"))
+        seed_comments(conn)
         conn.commit()
 
         users = conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]

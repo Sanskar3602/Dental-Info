@@ -146,6 +146,9 @@ def _post_out(row):
         d[f] = v if isinstance(v, list) else []
     d["procedurePath"] = d.pop("procedure_path", None)
     d["date"] = (d.get("created_at") or "")[:10]
+    # Always present, even when there is no discussion. The frontend reads
+    # .comments.length unconditionally; omitting the key blanks the page.
+    d["comments"] = []
     d["author"] = {
         "id": d.pop("author_id", None), "name": d.pop("author_name", None),
         "credential": d.pop("author_credential", None),
@@ -154,6 +157,30 @@ def _post_out(row):
         "role": d.pop("author_role", None),
     }
     return d
+
+
+def _attach_comments(cur, posts):
+    """Fill in each post's discussion with one query for the whole set."""
+    if not posts:
+        return posts
+    cur.execute(
+        """SELECT c.post_id, c.body, c.created_at,
+                  u.name AS author_name, u.verification_status AS author_verification
+             FROM comments c JOIN users u ON u.id = c.author_id
+            WHERE c.post_id = ANY(%s)
+         ORDER BY c.created_at ASC""",
+        ([p["id"] for p in posts],))
+    grouped = {}
+    for r in cur.fetchall():
+        grouped.setdefault(r["post_id"], []).append({
+            "author": r["author_name"],
+            "verified": r["author_verification"] == "verified",
+            "text": r["body"],
+            "date": (r["created_at"] or "")[:10],
+        })
+    for p in posts:
+        p["comments"] = grouped.get(p["id"], [])
+    return posts
 
 
 def get_user_by_email(cur, email):
@@ -354,8 +381,9 @@ def app(environ, start_response):
                                               else " WHERE p.status = 'published'") \
                             + " ORDER BY p.created_at DESC"
                         cur.execute(sql)
+                        posts = [_post_out(r) for r in cur.fetchall()]
                         return _json(start_response,
-                                     {"posts": [_post_out(r) for r in cur.fetchall()]})
+                                     {"posts": _attach_comments(cur, posts)})
                     if method == "POST":
                         if me is None:
                             return _err(start_response, 401, "Not signed in")
@@ -404,6 +432,8 @@ def app(environ, start_response):
                     cur.execute(_POST_SELECT + " WHERE p.id = %s", (post_id,))
                     row = cur.fetchone()
                     post = _post_out(row) if row else None
+                    if post:
+                        _attach_comments(cur, [post])
 
                     if method == "GET":
                         if not post:

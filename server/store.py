@@ -213,6 +213,8 @@ def _post_out(row) -> dict:
             d[f] = []
     d["procedurePath"] = d.pop("procedure_path", None)
     d["date"] = (d.get("created_at") or "")[:10]
+    # Always present — the frontend reads .comments.length unconditionally.
+    d["comments"] = []
     d["author"] = {
         "id": d.pop("author_id", None),
         "name": d.pop("author_name", None),
@@ -232,16 +234,45 @@ _POST_SELECT = """
 """
 
 
+def attach_comments(conn, posts):
+    """Fill in each post's discussion with one query for the whole set."""
+    if not posts:
+        return posts
+    marks = ",".join("?" for _ in posts)
+    rows = conn.execute(
+        "SELECT c.post_id, c.body, c.created_at, u.name AS author_name, "
+        "       u.verification_status AS author_verification "
+        "  FROM comments c JOIN users u ON u.id = c.author_id "
+        f" WHERE c.post_id IN ({marks}) ORDER BY c.created_at ASC",
+        [p["id"] for p in posts]).fetchall()
+    grouped = {}
+    for r in rows:
+        grouped.setdefault(r["post_id"], []).append({
+            "author": r["author_name"],
+            "verified": r["author_verification"] == "verified",
+            "text": r["body"],
+            "date": (r["created_at"] or "")[:10],
+        })
+    for p in posts:
+        p["comments"] = grouped.get(p["id"], [])
+    return posts
+
+
 def list_posts(conn, *, include_drafts=False) -> list[dict]:
     sql = _POST_SELECT + (
         "" if include_drafts else " WHERE p.status = 'published'"
     ) + " ORDER BY p.created_at DESC"
-    return [_post_out(r) for r in conn.execute(sql).fetchall()]
+    posts = [_post_out(r) for r in conn.execute(sql).fetchall()]
+    return attach_comments(conn, posts)
 
 
 def get_post(conn, post_id: str):
     row = conn.execute(_POST_SELECT + " WHERE p.id = ?", (post_id,)).fetchone()
-    return _post_out(row) if row else None
+    if not row:
+        return None
+    post = _post_out(row)
+    attach_comments(conn, [post])
+    return post
 
 
 def create_post(conn, *, author_id: str, data: dict) -> str:

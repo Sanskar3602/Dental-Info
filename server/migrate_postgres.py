@@ -155,6 +155,40 @@ def seed_cases(cur):
     print(f"  imported cases   {made}")
 
 
+def seed_comments(cur):
+    """Import the peer discussion. Ids derive from the case id -> idempotent."""
+    if not SEED_CASES.exists():
+        return
+    cases = json.loads(SEED_CASES.read_text(encoding="utf-8"))
+    made = 0
+    for case in cases:
+        for i, m in enumerate(case.get("comments") or []):
+            cid = f"{case['id']}-c{i}"
+            cur.execute("SELECT 1 FROM comments WHERE id = %s", (cid,))
+            if cur.fetchone():
+                continue
+            name = m.get("author") or "Unknown"
+            email = name.lower().replace("dr. ", "").replace(" ", ".") + "@dentalinfo.test"
+            cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+            row = cur.fetchone()
+            if row:
+                author_id = row["id"]
+            else:
+                author_id = create_user(cur, {
+                    "email": email, "name": name,
+                    "password": store.secrets.token_urlsafe(24),
+                    "credential": None, "location": None, "role": "contributor",
+                    "verification_status": "verified" if m.get("verified") else "unverified",
+                    "license_number": None, "license_board": None, "license_country": None,
+                })
+            cur.execute("INSERT INTO comments (id,post_id,author_id,body,created_at) "
+                        "VALUES (%s,%s,%s,%s,%s)",
+                        (cid, case["id"], author_id, m["text"],
+                         (m.get("date") or "") + "T12:00:00+00:00"))
+            made += 1
+    print(f"  imported comments {made}")
+
+
 def main():
     url = get_url()
     host = url.split("@")[-1].split("/")[0] if "@" in url else "?"
@@ -179,6 +213,7 @@ def main():
             print("\n  seeding")
             seed_accounts(cur)
             seed_cases(cur)
+            seed_comments(cur)
 
             print("\n  counts:", counts(cur))
     finally:
