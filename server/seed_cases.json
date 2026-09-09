@@ -1,0 +1,433 @@
+[
+ {
+  "id": "c-1041",
+  "title": "Separated rotary file in the apical third of a mandibular molar MB canal",
+  "procedure": "rct",
+  "procedurePath": "Endodontics › Root canal therapy",
+  "complications": [
+   "Instrument separation"
+  ],
+  "tools": [
+   "ProTaper Gold F2",
+   "Terauchi file retrieval kit",
+   "Dental operating microscope",
+   "EDTA 17%"
+  ],
+  "author": {
+   "name": "Dr. Aparna Rao",
+   "credential": "MDS Conservative Dentistry & Endodontics",
+   "location": "Bengaluru, IN",
+   "verified": true
+  },
+  "date": "2026-08-21",
+  "reads": 1840,
+  "saves": 212,
+  "difficulty": "High",
+  "summary": "F2 separated 3 mm from the apex in a curved MB canal. Retrieved under microscope with a staging platform plus ultrasonic loosening rather than bypassing.",
+  "presentation": "38-year-old female, previously initiated therapy elsewhere, presenting with intermittent pain on the lower left. Radiograph showed a radiopaque object in the apical third of the mesiobuccal canal of 36 with an intact apical seal.",
+  "unusual": "The curvature was roughly 35 degrees and the fragment was engaged below the curve, so straight-line access to the fragment head was not achievable with conventional trepanning.",
+  "resolution": [
+   "Removed the existing coronal restoration and re-established straight-line access under 16x magnification.",
+   "Created a staging platform with a modified Gates-Glidden #3 to expose the fragment head.",
+   "Loosened the fragment with an ultrasonic tip (dry field, intermittent 10-second bursts to avoid heat).",
+   "Fragment floated coronally in irrigant and was retrieved with a microtube plus wedge from the retrieval kit.",
+   "Completed shaping to F3, obturated with warm vertical compaction."
+  ],
+  "outcome": "6-week review asymptomatic, no periapical change. Full coverage crown planned.",
+  "takeaways": [
+   "Do not attempt to bypass below a 30-degree-plus curve before creating a staging platform — the perforation risk is materially higher.",
+   "Intermittent ultrasonic bursts in a dry field give better tactile feedback than continuous activation under irrigant."
+  ],
+  "media": [
+   {
+    "type": "image",
+    "label": "Pre-op PA radiograph"
+   },
+   {
+    "type": "image",
+    "label": "Microscope view — fragment head"
+   },
+   {
+    "type": "video",
+    "label": "Ultrasonic loosening (0:42)"
+   },
+   {
+    "type": "image",
+    "label": "Post-op PA radiograph"
+   }
+  ],
+  "comments": [
+   {
+    "author": "Dr. Nikhil Menon",
+    "verified": true,
+    "text": "Did you consider a bypass with an 08 C-file first? Curious how much dentine the staging platform cost you.",
+    "date": "2026-08-23"
+   },
+   {
+    "author": "Dr. Aparna Rao",
+    "verified": true,
+    "text": "I tried briefly — no purchase. Platform cost maybe 0.5 mm of radicular dentine, which I judged acceptable versus the perforation risk.",
+    "date": "2026-08-23"
+   }
+  ]
+ },
+ {
+  "id": "c-1039",
+  "title": "Sinus membrane perforation during lateral window lift — managed in the same visit",
+  "procedure": "sinuslift",
+  "procedurePath": "Implantology › Sinus lift",
+  "complications": [
+   "Perforation",
+   "Anatomical variation"
+  ],
+  "tools": [
+   "Piezo surgery unit",
+   "Collagen membrane (resorbable)",
+   "Xenograft particulate",
+   "Sinus curettes"
+  ],
+  "author": {
+   "name": "Dr. Marcus Feld",
+   "credential": "DDS, Oral & Maxillofacial Surgery",
+   "location": "Chicago, IL, US",
+   "verified": true
+  },
+  "date": "2026-08-14",
+  "reads": 2310,
+  "saves": 401,
+  "difficulty": "High",
+  "summary": "8 mm perforation over an underlying antral septum. Repaired with a folded collagen membrane and grafted the same day instead of aborting.",
+  "presentation": "61-year-old male, edentulous maxillary posterior, residual ridge height 3.5 mm. CBCT showed an Underwood septum not initially appreciated on the panoramic view.",
+  "unusual": "The septum divided the antral floor into two compartments; elevation from a single window tore the membrane over the septal crest.",
+  "resolution": [
+   "Stopped elevation immediately and irrigated to define the perforation margins.",
+   "Extended the window mesially to gain access to the second compartment and reduce tension on the torn membrane.",
+   "Elevated remaining membrane circumferentially so the tear was fully mobilised rather than tented.",
+   "Placed a resorbable collagen membrane folded double over the defect, tucked 3 mm beyond all margins.",
+   "Grafted with particulate xenograft at low pressure, closed primarily, staged implants at 7 months."
+  ],
+  "outcome": "No sinusitis, graft consolidated. Two implants placed at 7 months with 35 Ncm insertion torque.",
+  "takeaways": [
+   "Always read the CBCT axial slices for septa — panoramic reconstruction hides them.",
+   "A perforation over a septum is usually salvageable if you extend the window rather than fight the tear through the original one."
+  ],
+  "media": [
+   {
+    "type": "image",
+    "label": "CBCT axial — antral septum"
+   },
+   {
+    "type": "image",
+    "label": "Perforation, intra-op"
+   },
+   {
+    "type": "image",
+    "label": "Membrane repair in place"
+   }
+  ],
+  "comments": [
+   {
+    "author": "Dr. Sara Lindqvist",
+    "verified": true,
+    "text": "Did you cover with antibiotics beyond the standard regimen?",
+    "date": "2026-08-16"
+   }
+  ]
+ },
+ {
+  "id": "c-1036",
+  "title": "Persistent pain after apparently ideal RCT — missed second mesiobuccal canal (MB2)",
+  "procedure": "retreat",
+  "procedurePath": "Endodontics › Endo retreatment",
+  "complications": [
+   "Anatomical variation",
+   "Infection / flare-up"
+  ],
+  "tools": [
+   "CBCT (small FOV)",
+   "Ultrasonic troughing tips",
+   "Methylene blue dye",
+   "Operating microscope"
+  ],
+  "author": {
+   "name": "Dr. Priya Nair",
+   "credential": "MDS Endodontics",
+   "location": "Kochi, IN",
+   "verified": true
+  },
+  "date": "2026-07-30",
+  "reads": 3120,
+  "saves": 588,
+  "difficulty": "Medium",
+  "summary": "Radiographically clean RCT on a maxillary first molar with persistent bite tenderness for 5 months. Small-FOV CBCT revealed an untreated MB2.",
+  "presentation": "44-year-old male, RCT on 16 completed 5 months earlier, well-condensed on PA. Localised tenderness to percussion, no swelling, no sinus tract.",
+  "unusual": "The MB2 orifice was completely covered by a dentinal shelf and invisible even at 16x before troughing.",
+  "resolution": [
+   "Small-FOV CBCT confirmed a separate untreated canal in the mesiobuccal root.",
+   "Removed the coronal restoration, dye-stained the pulpal floor to map the developmental groove.",
+   "Troughed 2 mm along the groove palatally from MB1 with an ultrasonic tip until the orifice was located.",
+   "Negotiated with a 10 K-file, shaped to 25/.04, disinfected with passive ultrasonic irrigation.",
+   "Obturated all four canals, cuspal-coverage restoration placed."
+  ],
+  "outcome": "Asymptomatic at 3 months. Percussion tenderness resolved within 2 weeks.",
+  "takeaways": [
+   "Percussion tenderness with a radiographically clean RCT on an upper molar should raise MB2 suspicion before you consider surgery or extraction.",
+   "Dye staining the pulpal floor is a 60-second step that repeatedly finds what magnification alone misses."
+  ],
+  "media": [
+   {
+    "type": "image",
+    "label": "CBCT axial — untreated MB2"
+   },
+   {
+    "type": "image",
+    "label": "Pulpal floor after dye staining"
+   }
+  ],
+  "comments": []
+ },
+ {
+  "id": "c-1030",
+  "title": "Buccal plate fracture during upper premolar extraction with a thin ridge",
+  "procedure": "extraction",
+  "procedurePath": "Oral Surgery › Extraction",
+  "complications": [
+   "Fracture"
+  ],
+  "tools": [
+   "Periotome",
+   "Physics forceps",
+   "Collagen plug",
+   "Allograft particulate"
+  ],
+  "author": {
+   "name": "Dr. Owen Bright",
+   "credential": "BDS, MFDS RCS",
+   "location": "Manchester, UK",
+   "verified": true
+  },
+  "date": "2026-07-18",
+  "reads": 1490,
+  "saves": 176,
+  "difficulty": "Medium",
+  "summary": "Thin buccal plate fractured on luxation. Converted to socket preservation immediately to protect a planned implant site.",
+  "presentation": "52-year-old female, non-restorable 24 with a planned implant. CBCT buccal plate thickness measured 0.6 mm.",
+  "unusual": "Plate fractured despite atraumatic technique — the root had a buccal concavity that effectively made the plate a shell.",
+  "resolution": [
+   "Retrieved the fractured plate fragment and preserved it in saline.",
+   "Completed the extraction with vertical-only forces using physics forceps.",
+   "Repositioned the fragment, stabilised with allograft particulate and a collagen plug.",
+   "Free gingival graft for soft-tissue closure; delayed implant to 5 months."
+  ],
+  "outcome": "Ridge width maintained at 6.2 mm at 5 months; implant placed without additional grafting.",
+  "takeaways": [
+   "Measure buccal plate thickness on CBCT before any extraction in a planned implant site — under 1 mm, plan for preservation from the start.",
+   "Vertical-only extraction forces on thin-plate premolars; no buccal luxation."
+  ],
+  "media": [
+   {
+    "type": "image",
+    "label": "CBCT — 0.6 mm buccal plate"
+   },
+   {
+    "type": "image",
+    "label": "Socket after preservation"
+   }
+  ],
+  "comments": []
+ },
+ {
+  "id": "c-1024",
+  "title": "Repeated anesthesia failure on an acutely inflamed mandibular molar",
+  "procedure": "rct",
+  "procedurePath": "Endodontics › Root canal therapy",
+  "complications": [
+   "Failed anesthesia"
+  ],
+  "tools": [
+   "Articaine 4% with epi",
+   "Intraosseous injection system",
+   "Buffered lidocaine",
+   "Intrapulpal needle"
+  ],
+  "author": {
+   "name": "Dr. Hana Suzuki",
+   "credential": "DDS, PhD",
+   "location": "Osaka, JP",
+   "verified": true
+  },
+  "date": "2026-07-02",
+  "reads": 4020,
+  "saves": 720,
+  "difficulty": "Low",
+  "summary": "Three failed IANBs on an irreversible pulpitis case. Achieved profound anesthesia with a buffered supplemental approach plus intraosseous injection.",
+  "presentation": "29-year-old male, spontaneous throbbing pain on 37, positive to cold, tender to percussion. Lip numb after IANB but pulp still responsive.",
+  "unusual": "Lip numbness present — so the block worked anatomically — but pulpal anesthesia repeatedly failed, consistent with peripheral nociceptor sensitisation.",
+  "resolution": [
+   "Confirmed soft-tissue anesthesia, then gave a buccal infiltration of 4% articaine with epinephrine.",
+   "Supplemented with an intraosseous injection distal to 37.",
+   "Tested with cold before starting; still mildly responsive, so added an intrapulpal injection after initial access.",
+   "Completed pulpectomy in the same visit with no pain reported."
+  ],
+  "outcome": "Comfortable throughout; obturated at second visit.",
+  "takeaways": [
+   "Lip numbness is not a test of pulpal anesthesia — always cold-test before access.",
+   "Escalate deliberately: infiltration, then intraosseous, then intrapulpal, rather than repeating the block."
+  ],
+  "media": [
+   {
+    "type": "image",
+    "label": "Pre-op PA radiograph"
+   }
+  ],
+  "comments": [
+   {
+    "author": "Dr. Tom Achebe",
+    "verified": true,
+    "text": "Buffering made the biggest difference for me too. Onset drops to about two minutes.",
+    "date": "2026-07-05"
+   }
+  ]
+ },
+ {
+  "id": "c-1019",
+  "title": "Peri-implantitis with 4 mm bone loss treated by reconstructive approach",
+  "procedure": "periimp",
+  "procedurePath": "Implantology › Peri-implantitis",
+  "complications": [
+   "Infection / flare-up",
+   "Material failure"
+  ],
+  "tools": [
+   "Titanium brush",
+   "Er:YAG laser",
+   "Xenograft",
+   "Resorbable membrane"
+  ],
+  "author": {
+   "name": "Dr. Sara Lindqvist",
+   "credential": "DDS, Specialist in Periodontology",
+   "location": "Stockholm, SE",
+   "verified": true
+  },
+  "date": "2026-06-21",
+  "reads": 1980,
+  "saves": 300,
+  "difficulty": "High",
+  "summary": "Circumferential 4 mm defect around a 6-year-old implant. Surface decontamination plus reconstruction rather than explantation.",
+  "presentation": "58-year-old female, bleeding and 7 mm probing depth around a mandibular first molar implant, suppuration, implant not mobile.",
+  "unusual": "The defect was contained and circumferential — an unusually favourable morphology that made reconstruction viable where most similar depths get explanted.",
+  "resolution": [
+   "Full-thickness flap, granulation tissue removal, defect morphology assessed as contained on all four walls.",
+   "Mechanical decontamination with a titanium brush, then Er:YAG laser at 100 mJ / 10 Hz.",
+   "Grafted with xenograft, covered with a resorbable membrane, primary closure without implant submersion.",
+   "Systemic antibiotics 7 days, chlorhexidine rinse 2 weeks, no loading change."
+  ],
+  "outcome": "12-month probing depth 3 mm, no bleeding, radiographic fill of approximately 3 mm.",
+  "takeaways": [
+   "Defect morphology, not absolute bone loss, is the main predictor of whether reconstruction will hold.",
+   "A contained circumferential defect is worth attempting to reconstruct before considering explantation."
+  ],
+  "media": [
+   {
+    "type": "image",
+    "label": "Baseline radiograph"
+   },
+   {
+    "type": "image",
+    "label": "Defect exposed"
+   },
+   {
+    "type": "image",
+    "label": "12-month radiograph"
+   }
+  ],
+  "comments": []
+ },
+ {
+  "id": "c-1012",
+  "title": "Lingual nerve paresthesia after third molar surgery — recovery timeline and management",
+  "procedure": "thirdmolar",
+  "procedurePath": "Oral Surgery › Third molar surgery",
+  "complications": [
+   "Nerve injury"
+  ],
+  "tools": [
+   "Lingual retractor",
+   "Piezo surgery unit",
+   "High-dose steroid protocol"
+  ],
+  "author": {
+   "name": "Dr. Marcus Feld",
+   "credential": "DDS, Oral & Maxillofacial Surgery",
+   "location": "Chicago, IL, US",
+   "verified": true
+  },
+  "date": "2026-06-09",
+  "reads": 2760,
+  "saves": 455,
+  "difficulty": "Medium",
+  "summary": "Altered lingual sensation after a distoangular 48 removal. Documented the monitoring protocol and full recovery at 14 weeks.",
+  "presentation": "24-year-old female, distoangular impacted 48 with lingual angulation of the crown. Reported altered taste and numbness on the left tongue on day 1.",
+  "unusual": "Sensory change without any lingual flap having been raised — attributed to retraction pressure rather than direct transection.",
+  "resolution": [
+   "Documented the affected area with a mapped diagram and two-point discrimination at each visit.",
+   "Started a short high-dose steroid course within 48 hours of onset.",
+   "Reviewed at 2, 6, 10 and 14 weeks with mapped sensory testing rather than subjective report alone.",
+   "Counselled the patient explicitly on the expected recovery window and referral threshold at 3 months."
+  ],
+  "outcome": "Complete resolution by week 14. No surgical exploration required.",
+  "takeaways": [
+   "Map and measure sensory deficits at every visit — subjective report alone makes it impossible to tell recovery from adaptation.",
+   "Set a referral threshold in advance (commonly 3 months) so the decision is not made ad hoc."
+  ],
+  "media": [
+   {
+    "type": "image",
+    "label": "Sensory mapping diagram"
+   }
+  ],
+  "comments": []
+ },
+ {
+  "id": "c-1007",
+  "title": "Debonding aligner attachments repeatedly on a bruxist patient",
+  "procedure": "aligner",
+  "procedurePath": "Orthodontics › Aligner therapy",
+  "complications": [
+   "Material failure"
+  ],
+  "tools": [
+   "Flowable composite",
+   "Universal adhesive",
+   "Rubber dam isolation",
+   "Nightguard"
+  ],
+  "author": {
+   "name": "Dr. Tom Achebe",
+   "credential": "BDS, MOrth",
+   "location": "Lagos, NG",
+   "verified": true
+  },
+  "date": "2026-05-28",
+  "reads": 1120,
+  "saves": 132,
+  "difficulty": "Low",
+  "summary": "Attachments failed three times in six weeks. Root cause was isolation, not the composite — moving to rubber dam solved it.",
+  "presentation": "35-year-old male in aligner therapy, heavy bruxism, attachments on 14/15/24/25 debonded repeatedly, stalling tracking.",
+  "unusual": "The failure was reproducible on the same four teeth only — pointing to a technique variable rather than patient load.",
+  "resolution": [
+   "Reviewed bonding protocol; identified sulcular moisture contamination on the premolars with cotton-roll isolation only.",
+   "Re-bonded under rubber dam with a fresh universal adhesive and a filled flowable.",
+   "Extended cure time to 40 seconds per attachment surface.",
+   "Fitted a nightguard for use over aligners during the retention phase."
+  ],
+  "outcome": "No further debonds over the following 5 months; tracking recovered without a refinement scan.",
+  "takeaways": [
+   "Repeated failure on the same teeth is nearly always a technique or isolation variable, not the material.",
+   "Rubber dam for attachment bonding costs three minutes and removes the most common failure cause."
+  ],
+  "media": [],
+  "comments": []
+ }
+]

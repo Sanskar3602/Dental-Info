@@ -27,3 +27,19 @@ desktop.ini
 # ── Logs ──────────────────────────────────────────────────
 *.log
 npm-debug.log*
+
+# ── Local credentials & database ──────────────────────────
+# ACCOUNTS.txt holds the seeded dev passwords in plain text.
+ACCOUNTS.txt
+*.db
+*.db-wal
+*.db-shm
+server/dental_info.db*
+
+# server logs from local runs
+server_test.log
+strict.log
+
+# Python
+__pycache__/
+*.py[cod]
