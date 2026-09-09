@@ -208,11 +208,15 @@ h1,h2,h3,h4{margin:0;line-height:1.2;letter-spacing:-.018em}
 
 .role-switch{display:flex;align-items:center;gap:8px;padding-left:15px;border-left:1px solid var(--line)}
 .role-switch-label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4);font-weight:700}
+/* NOTE: no fixed height here — a global height clips the taller form
+   selects, whose own rule adds 10px of vertical padding. The compact
+   height belongs only to the chrome selects, scoped just below. */
 select{
-  height:31px;border:1px solid var(--line-2);border-radius:8px;
-  background:var(--surface);color:var(--ink-2);font-size:12.5px;padding:0 7px;
+  border:1px solid var(--line-2);border-radius:8px;
+  background:var(--surface);color:var(--ink-2);font-size:12.5px;
   transition:border-color .16s;
 }
+.role-switch select,.sort-wrap select{height:31px;padding:0 7px}
 select:hover{border-color:var(--accent)}
 select:focus{outline:none;border-color:var(--accent);box-shadow:var(--sh-glow)}
 .avatar{
@@ -596,6 +600,8 @@ select:focus{outline:none;border-color:var(--accent);box-shadow:var(--sh-glow)}
   padding:10px 12px;font:inherit;font-size:14px;color:var(--ink);background:var(--surface);
   transition:border-color .18s, box-shadow .18s;
 }
+/* let the text set the height instead of inheriting the chrome height */
+.field select{height:auto;min-height:44px;line-height:1.4;padding-right:34px}
 .field textarea{min-height:100px;resize:vertical;line-height:1.65}
 .field input:focus,.field textarea:focus,.field select:focus{outline:none;border-color:var(--accent);box-shadow:var(--sh-glow)}
 .field-row{display:grid;grid-template-columns:1fr 1fr;gap:15px}
@@ -771,3 +777,15 @@ html::before{
 /* the rails read as floating on the plane, so give the sidebar
    headings a touch more presence against the tint */
 .rail-title{color:var(--ink-3)}
+
+/* ── "Other" write-in field, revealed by the Other option ── */
+[hidden]{display:none!important}
+.other-field{
+  margin:12px 0 0;padding:13px 15px;
+  border-left:2px solid var(--accent);border-radius:0 var(--r-md) var(--r-md) 0;
+  background:var(--accent-wash);
+  animation:rise .26s var(--ease) both;
+}
+.other-field label{font-size:12px}
+.other-field .hint{margin-bottom:0}
+.other-field input[type=text]{background:var(--surface)}

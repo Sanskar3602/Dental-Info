@@ -429,14 +429,26 @@ function renderContribute() {
             <option value="">Select a procedure…</option>
             ${PROCEDURES.map((g) => `<optgroup label="${esc(g.label)}">
               ${g.children.map((c) => `<option value="${c.id}">${esc(c.label)}</option>`).join("")}</optgroup>`).join("")}
+            <option value="__other">Other — not listed</option>
           </select>
+          <div class="field other-field" id="f-proc-other-wrap" hidden>
+            <label for="f-proc-other">Which procedure?</label>
+            <input id="f-proc-other" type="text" placeholder="e.g. Apexification">
+            <p class="hint">New procedure types go to an editor before they join the taxonomy.</p>
+          </div>
         </div>
         <div class="field">
           <label for="f-comp">Primary complication</label>
           <select id="f-comp" required>
             <option value="">Select a complication…</option>
             ${COMPLICATIONS.map((c) => `<option>${esc(c)}</option>`).join("")}
+            <option value="__other">Other — not listed</option>
           </select>
+          <div class="field other-field" id="f-comp-other-wrap" hidden>
+            <label for="f-comp-other">Which complication?</label>
+            <input id="f-comp-other" type="text" placeholder="e.g. Emphysema from air-driven handpiece">
+            <p class="hint">Describe it in a few words, the way you would search for it later.</p>
+          </div>
         </div>
       </div>
       <div class="field">
@@ -481,11 +493,39 @@ function renderContribute() {
     </form>
   </div>`);
 
+  /* Choosing "Other" reveals a free-text field, and that field is only
+     required while it is visible — otherwise a hidden empty input would
+     block submission. */
+  const wireOther = (selectId, wrapId, inputId) => {
+    const sel = $("#" + selectId, view);
+    const wrap = $("#" + wrapId, view);
+    const input = $("#" + inputId, view);
+    const sync = (moveFocus) => {
+      const on = sel.value === "__other";
+      wrap.hidden = !on;
+      input.required = on;
+      if (!on) input.value = "";
+      else if (moveFocus) input.focus();
+    };
+    sel.addEventListener("change", () => sync(true));
+    sync(false);
+  };
+  wireOther("f-proc", "f-proc-other-wrap", "f-proc-other");
+  wireOther("f-comp", "f-comp-other-wrap", "f-comp-other");
+
+  /* What the entry would be filed under, honouring an "Other" write-in */
+  const chosen = (selectId, otherId) => {
+    const sel = $("#" + selectId, view);
+    if (sel.value === "__other") return $("#" + otherId, view).value.trim();
+    return sel.selectedOptions[0] ? sel.selectedOptions[0].textContent.trim() : "";
+  };
+
   $("#saveDraft", view).onclick = () => toast("Draft saved");
   $("#caseForm", view).onsubmit = (e) => {
     e.preventDefault();
-    toast("Case published — visible under its procedure category");
-    setTimeout(() => { location.hash = "#/browse"; }, 900);
+    const proc = chosen("f-proc", "f-proc-other");
+    toast(proc ? `Case published under “${proc}”` : "Case published");
+    setTimeout(() => { location.hash = "#/browse"; }, 1000);
   };
   return view;
 }
