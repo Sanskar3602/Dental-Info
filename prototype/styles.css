@@ -789,3 +789,89 @@ html::before{
 .other-field label{font-size:12px}
 .other-field .hint{margin-bottom:0}
 .other-field input[type=text]{background:var(--surface)}
+
+/* ============================================================
+   Auth: top-bar account control, login screen, destructive
+   actions. Added when the app moved onto a real database.
+   ============================================================ */
+
+.auth-slot{display:flex;align-items:center;gap:10px;flex-shrink:0;
+  padding-left:15px;border-left:1px solid var(--line)}
+.account{display:flex;align-items:center;gap:10px}
+.account-meta{display:flex;flex-direction:column;align-items:flex-end;line-height:1.25}
+.account-name{font-size:12.5px;font-weight:600;white-space:nowrap}
+.account-role{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)}
+.account-role.is-admin{color:var(--accent)}
+
+/* ── Login ─────────────────────────────────────────────── */
+.login-wrap{display:grid;place-items:center;min-height:72vh;padding:20px}
+.login-card{
+  width:100%;max-width:404px;background:var(--surface);
+  border:1px solid var(--line);border-radius:var(--r-2xl);
+  padding:34px 32px;box-shadow:var(--sh-3);animation:rise .45s var(--ease) both;
+}
+.login-mark{
+  width:46px;height:46px;border-radius:14px;display:grid;place-items:center;
+  color:#fff;margin-bottom:18px;
+  background:linear-gradient(145deg,var(--t-500),var(--t-800) 60%,var(--t-950));
+  box-shadow:0 4px 14px -4px rgba(19,99,102,.5), inset 0 1px 0 rgba(255,255,255,.2);
+}
+.login-mark svg{width:26px;height:26px}
+.login-card h1{font-size:23px;margin-bottom:5px}
+.login-sub{color:var(--ink-3);font-size:13.5px;margin:0 0 24px}
+.login-card .field input[type=text],.login-card .field input[type=password]{
+  width:100%;border:1px solid var(--line-2);border-radius:10px;
+  padding:10px 12px;font:inherit;font-size:14px;
+  color:var(--ink);background:var(--surface);
+  transition:border-color .18s, box-shadow .18s;
+}
+.login-card .field input:focus{outline:none;border-color:var(--accent);box-shadow:var(--sh-glow)}
+.login-error{
+  margin:0 0 14px;padding:9px 12px;border-radius:9px;font-size:13px;font-weight:500;
+  background:var(--rose-100);color:var(--rose-700);border:1px solid var(--rose-700);
+}
+.login-hint{margin-top:22px;padding-top:19px;border-top:1px solid var(--line)}
+.login-hint p{margin:0 0 9px;font-size:12px;color:var(--ink-3)}
+.login-hint code{
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;
+  background:var(--surface-2);border:1px solid var(--line);
+  padding:1px 5px;border-radius:4px;
+}
+.login-accounts{display:flex;gap:7px;flex-wrap:wrap}
+.acct-chip{
+  padding:5px 11px;border:1px solid var(--line-2);border-radius:99px;
+  background:var(--surface);font-size:12px;font-weight:500;color:var(--ink-2);
+  transition:all .16s var(--ease);
+}
+.acct-chip:hover{border-color:var(--accent);color:var(--accent-ink);transform:translateY(-1px)}
+
+/* ── Destructive action ────────────────────────────────── */
+.btn-danger{
+  background:var(--surface);border-color:var(--rose-700);color:var(--rose-700);
+}
+.btn-danger:hover{background:var(--rose-100);transform:translateY(-1.5px)}
+.btn-danger svg{width:15px;height:15px}
+.panel-note{margin:9px 0 0;font-size:11.5px;color:var(--ink-4);line-height:1.5}
+
+/* ── Dev-mode notice ──────────────────────────────────── */
+.panel.dev-note{
+  margin-bottom:14px;background:var(--amber-100);border-color:var(--amber-700);
+}
+.panel.dev-note h4{color:var(--amber-700)}
+.panel.dev-note p{margin:0;font-size:12.5px;color:var(--ink-2);line-height:1.6}
+.panel.dev-note code{
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;
+  background:var(--surface);border:1px solid var(--line);padding:1px 5px;border-radius:4px;
+}
+
+/* marks which role row is the signed-in account */
+.kv-row .yes{
+  font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;
+  background:var(--accent);color:var(--surface);
+  padding:1px 6px;border-radius:99px;margin-left:5px;
+}
+
+@media (max-width:860px){
+  .account-meta{display:none}
+  .auth-slot{padding-left:8px;border-left:0}
+}

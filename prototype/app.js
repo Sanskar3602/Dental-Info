@@ -12,6 +12,44 @@ const state = {
   sort: "recent",
 };
 
+/* Cases and the signed-in user come from the API now, not data.js. */
+let CASES = [];
+let SESSION = null;       // null = signed out
+
+/* ── API ─────────────────────────────────────────────────── */
+const API = {
+  async call(method, path, body) {
+    const res = await fetch(path, {
+      method,
+      credentials: "same-origin",
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    let payload = null;
+    try { payload = await res.json(); } catch (e) { /* empty body */ }
+    if (!res.ok) {
+      const err = new Error((payload && payload.error) || `Request failed (${res.status})`);
+      err.status = res.status;
+      throw err;
+    }
+    return payload;
+  },
+  me:        ()          => API.call("GET", "/api/me"),
+  login:     (email, pw) => API.call("POST", "/api/login", { email, password: pw }),
+  logout:    ()          => API.call("POST", "/api/logout"),
+  posts:     ()          => API.call("GET", "/api/posts"),
+  createPost:(data)      => API.call("POST", "/api/posts", data),
+  deletePost:(id)        => API.call("DELETE", "/api/posts/" + encodeURIComponent(id)),
+};
+
+/* Pull fresh session + cases, then repaint. */
+async function refresh({ session = true, posts = true } = {}) {
+  const jobs = [];
+  if (session) jobs.push(API.me().then((r) => { SESSION = r.user; }));
+  if (posts)   jobs.push(API.posts().then((r) => { CASES = r.posts; }));
+  await Promise.all(jobs);
+}
+
 /* ── Tiny helpers ────────────────────────────────────────── */
 const $  = (s, r = document) => r.querySelector(s);
 const el = (h) => { const t = document.createElement("template"); t.innerHTML = h.trim(); return t.content.firstElementChild; };
@@ -46,7 +84,14 @@ const ICON = {
 };
 
 const verifiedBadge = () => `<span class="verified">${ICON.check}Verified</span>`;
-const canPost = () => SESSION.role === "contributor";
+
+/* Authorisation questions, answered by the server and mirrored here so the
+   UI can hide what the API would refuse. The server is the real gate. */
+const signedIn     = () => SESSION !== null;
+const canPost      = () => !!(SESSION && SESSION.can_post);
+const isAdmin      = () => !!(SESSION && SESSION.is_admin);
+const canDelete    = (c) => !!(SESSION && (SESSION.can_delete_any ||
+                          (c && c.author && c.author.id === SESSION.id)));
 
 /* Difficulty as an ordinal 3-step meter. The text label is always
    rendered alongside, so the hue never carries the meaning alone. */
@@ -57,7 +102,8 @@ function diffMeter(level) {
   </span>`;
 }
 
-const ALL_TOOLS = [...new Set(CASES.flatMap((c) => c.tools))].sort();
+/* computed on demand — CASES is loaded from the API after boot */
+const allTools = () => [...new Set(CASES.flatMap((c) => c.tools || []))].sort();
 
 /* ── Filtering ───────────────────────────────────────────── */
 function procLabel(id) {
@@ -228,7 +274,7 @@ function renderBrowse() {
     });
   };
   chipRow($("#compChips", view), COMPLICATIONS, state.complications);
-  chipRow($("#toolChips", view), ALL_TOOLS.slice(0, 14), state.tools);
+  chipRow($("#toolChips", view), allTools().slice(0, 14), state.tools);
 
   /* results, with a staggered entrance */
   const list = $("#caseList", view);
@@ -356,6 +402,14 @@ function renderCase(id) {
       <aside class="sidecar">
         <div class="panel">
           <button class="btn btn-primary btn-block" id="saveCase">${ICON.bookmk} Save to library</button>
+          ${canDelete(c) ? `
+          <button class="btn btn-danger btn-block" id="deleteCase" style="margin-top:9px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></svg>
+            Delete case
+          </button>
+          <p class="panel-note">${SESSION.can_delete_any && c.author.id !== SESSION.id
+            ? "You are deleting another dentist’s case as an admin."
+            : "This removes the case permanently."}</p>` : ""}
         </div>
         <div class="panel">
           <h4>Tools &amp; materials used</h4>
@@ -380,22 +434,54 @@ function renderCase(id) {
     </div>
   </div>`);
 
-  $("#saveCase", view).onclick = () => toast("Saved to your library");
+  $("#saveCase", view).onclick = () => toast("Saving to a library is not wired up yet");
   const ac = $("#addComment", view);
-  if (ac) ac.onclick = () => toast("Comment composer — not built in this prototype");
+  if (ac) ac.onclick = () => toast("Comment composer is not wired up yet");
+
+  const del = $("#deleteCase", view);
+  if (del) {
+    del.onclick = async () => {
+      if (!confirm(`Delete this case permanently?\n\n“${c.title}”\n\nThis cannot be undone.`)) return;
+      del.disabled = true;
+      del.textContent = "Deleting…";
+      try {
+        await API.deletePost(c.id);
+        await refresh({ session: false });
+        toast("Case deleted");
+        location.hash = "#/browse";
+        render();
+      } catch (err) {
+        toast(err.message);
+        del.disabled = false;
+        del.textContent = "Delete case";
+      }
+    };
+  }
   return view;
 }
 
 /* ── Contribute view (role-gated) ────────────────────────── */
 function renderContribute() {
+  if (!signedIn()) {
+    return el(`<div class="gate">
+      <div class="gate-icon">${ICON.lock}</div>
+      <h2>Sign in to contribute</h2>
+      <p>Anyone can read Dental Info, but publishing a case needs an account.</p>
+      <div class="gate-actions">
+        <a class="btn btn-primary" href="#/login">Sign in</a>
+        <a class="btn btn-ghost" href="#/browse">Keep browsing</a>
+      </div>
+    </div>`);
+  }
+
   if (!canPost()) {
-    const pending = SESSION.role === "pending";
+    const pending = SESSION.verification_status === "pending";
     return el(`<div class="gate">
       <div class="gate-icon">${pending ? ICON.clock : ICON.lock}</div>
       <h2>${pending ? "Your verification is still in review" : "Only verified dentists can contribute"}</h2>
       <p>${pending
         ? "We are cross-checking your license against the issuing board. You will get posting rights as soon as it clears — usually within two business days."
-        : "Anyone can read Dental Info, but posting a case requires a verified dental license. Verification takes a few minutes to submit."}</p>
+        : "Your account is read-only. Publishing a case requires a verified dental license."}</p>
       <div class="gate-actions">
         <a class="btn btn-primary" href="#/verify">${ICON.shield} ${pending ? "View verification status" : "Start verification"}</a>
         <a class="btn btn-ghost" href="#/browse">Keep browsing</a>
@@ -488,7 +574,7 @@ function renderContribute() {
       </div>
       <div class="form-actions">
         <button type="button" class="btn btn-ghost" id="saveDraft">Save draft</button>
-        <button type="submit" class="btn btn-primary">${ICON.check} Publish case</button>
+        <button type="submit" class="btn btn-primary" id="publishBtn">${ICON.check} Publish case</button>
       </div>
     </form>
   </div>`);
@@ -520,34 +606,115 @@ function renderContribute() {
     return sel.selectedOptions[0] ? sel.selectedOptions[0].textContent.trim() : "";
   };
 
-  $("#saveDraft", view).onclick = () => toast("Draft saved");
-  $("#caseForm", view).onsubmit = (e) => {
+  /* Split a textarea into a list, one item per non-empty line. */
+  const lines = (id) => $("#" + id, view).value
+    .split("\n").map((s) => s.trim()).filter(Boolean);
+  const val = (id) => $("#" + id, view).value.trim();
+
+  const submitBtn = $("#publishBtn", view);
+
+  $("#saveDraft", view).onclick = () => toast("Draft saving is not wired up yet");
+
+  $("#caseForm", view).onsubmit = async (e) => {
     e.preventDefault();
-    const proc = chosen("f-proc", "f-proc-other");
-    toast(proc ? `Case published under “${proc}”` : "Case published");
-    setTimeout(() => { location.hash = "#/browse"; }, 1000);
+
+    const procSel = $("#f-proc", view);
+    const writeIn = procSel.value === "__other";
+    const procLeaf = chosen("f-proc", "f-proc-other");
+    const compLabel = chosen("f-comp", "f-comp-other");
+
+    if (!val("f-title")) { toast("A title is required"); return; }
+    if (!procLeaf)       { toast("Choose a procedure type"); return; }
+
+    // build the display path: "Group › Leaf", or "Proposed › <write-in>"
+    let path = procLeaf;
+    if (!writeIn) {
+      const p = procLabel(procSel.value);
+      if (p) path = `${p.group} › ${p.leaf}`;
+    } else {
+      path = `Proposed › ${procLeaf}`;
+    }
+
+    const payload = {
+      title: val("f-title"),
+      procedure: writeIn ? "__other" : procSel.value,
+      procedurePath: path,
+      difficulty: $("#f-diff", view).value,
+      summary: val("f-unusual").slice(0, 220) || val("f-title"),
+      complications: compLabel ? [compLabel] : [],
+      tools: val("f-tools").split(",").map((s) => s.trim()).filter(Boolean),
+      resolution: lines("f-res"),
+      takeaways: [],
+      media: [],
+      presentation: val("f-pres"),
+      unusual: val("f-unusual"),
+      outcome: val("f-out"),
+    };
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Publishing…";
+    try {
+      const { post } = await API.createPost(payload);
+      await refresh({ session: false });
+      toast(`Published — “${post.title.slice(0, 40)}”`);
+      location.hash = "#/case/" + post.id;
+      render();
+    } catch (err) {
+      toast(err.message);
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = `${ICON.check} Publish case`;
+    }
   };
   return view;
 }
 
 /* ── Verification view ───────────────────────────────────── */
 function renderVerify() {
-  const role = SESSION.role;
+  if (!signedIn()) {
+    return el(`<div class="gate">
+      <div class="gate-icon">${ICON.shield}</div>
+      <h2>Sign in to see your verification status</h2>
+      <p>Verification is tied to your account.</p>
+      <div class="gate-actions">
+        <a class="btn btn-primary" href="#/login">Sign in</a>
+        <a class="btn btn-ghost" href="#/browse">Keep browsing</a>
+      </div>
+    </div>`);
+  }
+
+  const status = SESSION.verification_status;   // unverified | pending | verified | lapsed
   const banner = {
-    contributor: { cls: "sb-ok", icon: ICON.shield, h: "You are a verified contributor",
-      p: "License confirmed against the issuing board. You can publish cases and comment. Next re-verification due Aug 2027." },
+    verified: { cls: "sb-ok", icon: ICON.shield, h: "Your license is verified",
+      p: SESSION.reverify_due
+         ? `Confirmed against the issuing board. Next re-verification due ${fmtDate(SESSION.reverify_due.slice(0,10))}.`
+         : "Confirmed against the issuing board." },
     pending: { cls: "sb-pending", icon: ICON.clock, h: "Verification in review",
       p: "Registry cross-check is running. Most submissions clear within two business days." },
-    reader: { cls: "sb-none", icon: ICON.lock, h: "Read-only account",
+    lapsed: { cls: "sb-pending", icon: ICON.clock, h: "Your verification has lapsed",
+      p: "Re-submit your license to restore posting rights." },
+    unverified: { cls: "sb-none", icon: ICON.lock, h: "Not yet verified",
       p: "You can browse and search every case. Submit your license to get posting rights." },
-  }[role];
+  }[status] || { cls: "sb-none", icon: ICON.lock, h: status, p: "" };
 
-  const stepState = (s) => {
-    if (role === "contributor") return "done";
-    if (role === "reader") return s.key === "account" ? "done" : "todo";
-    return s.state;
-  };
+  /* The step list is derived from the account record rather than stored
+     per-user: each step is a fact we can already answer. */
+  const has = (v) => !!(v && String(v).trim());
+  const steps = [
+    { label: "Account created", state: "done" },
+    { label: "License number & board submitted",
+      state: has(SESSION.license.number) && has(SESSION.license.board) ? "done" : "todo" },
+    { label: "Automatic registry cross-check",
+      state: status === "verified" ? "done" : (status === "pending" ? "pending" : "todo") },
+    { label: "Degree & license certificate upload",
+      state: status === "verified" ? "done" : "todo" },
+    { label: "Admin review",
+      state: status === "verified" ? "done" : (status === "pending" ? "pending" : "todo") },
+  ];
   const stepText = { done: "Complete", pending: "In progress", todo: "Not started" };
+
+  const roleRow = (name, granted, detail) => `<div class="kv-row">
+    <span class="k">${esc(name)} ${granted ? '<span class="yes">you</span>' : ""}</span>
+    <span class="v">${esc(detail)}</span></div>`;
 
   const view = el(`<div class="verify-wrap">
     <section class="hero compact" style="margin-bottom:24px">
@@ -563,40 +730,141 @@ function renderVerify() {
       <div><h3>${banner.h}</h3><p>${banner.p}</p></div>
     </div>
 
+    ${SESSION.permissive_mode ? `<div class="panel dev-note">
+      <h4>Development mode</h4>
+      <p>Permissions are currently <b>permissive</b> — every signed-in account has full
+         access regardless of the role below, as requested. Roles are still recorded per
+         account and every check is in place; they are short-circuited by one flag.
+         Start the server with <code>DENTAL_INFO_STRICT=1</code> to enforce them.</p>
+    </div>` : ""}
+
+    <div class="panel" style="margin-bottom:14px">
+      <h4>Your account</h4>
+      <div class="kv">
+        <div class="kv-row"><span class="k">Name</span><span class="v">${esc(SESSION.name)}</span></div>
+        <div class="kv-row"><span class="k">Email</span><span class="v">${esc(SESSION.email)}</span></div>
+        <div class="kv-row"><span class="k">Role</span><span class="v">${esc(SESSION.role)}</span></div>
+        <div class="kv-row"><span class="k">Credential</span><span class="v">${esc(SESSION.credential || "—")}</span></div>
+        <div class="kv-row"><span class="k">Effective rights</span><span class="v">${
+          [SESSION.can_post ? "publish" : null,
+           SESSION.can_delete_any ? "delete any case" : "delete own cases",
+           SESSION.is_admin ? "manage users" : null].filter(Boolean).join(" · ")
+        }</span></div>
+      </div>
+    </div>
+
     <div class="panel" style="margin-bottom:14px">
       <h4>Verification steps</h4>
       <ul class="vsteps">
-        ${SESSION.verification.steps.map((s) => {
-          const st = stepState(s);
-          return `<li class="vstep ${st}">
-            <span class="dot">${st === "done" ? ICON.check : ""}</span>
-            <span class="txt">${esc(s.label)}<span class="st">${stepText[st]}</span></span>
-            ${st === "todo" && s.key === "docs" ? `<span class="act"><button class="btn btn-ghost btn-sm" data-act="upload">Upload</button></span>` : ""}
-          </li>`;
-        }).join("")}
+        ${steps.map((s) => `<li class="vstep ${s.state}">
+            <span class="dot">${s.state === "done" ? ICON.check : ""}</span>
+            <span class="txt">${esc(s.label)}<span class="st">${stepText[s.state]}</span></span>
+            ${s.state === "todo" && s.label.indexOf("certificate") > -1
+              ? `<span class="act"><button class="btn btn-ghost btn-sm" data-act="upload">Upload</button></span>` : ""}
+          </li>`).join("")}
       </ul>
     </div>
 
     <div class="panel" style="margin-bottom:14px">
       <h4>License on file</h4>
       <div class="kv">
-        <div class="kv-row"><span class="k">License number</span><span class="v">${esc(SESSION.license.number)}</span></div>
-        <div class="kv-row"><span class="k">Issuing board</span><span class="v">${esc(SESSION.license.board)}</span></div>
-        <div class="kv-row"><span class="k">Country</span><span class="v">${esc(SESSION.license.country)}</span></div>
+        <div class="kv-row"><span class="k">License number</span><span class="v">${esc(SESSION.license.number || "Not submitted")}</span></div>
+        <div class="kv-row"><span class="k">Issuing board</span><span class="v">${esc(SESSION.license.board || "Not submitted")}</span></div>
+        <div class="kv-row"><span class="k">Country</span><span class="v">${esc(SESSION.license.country || "—")}</span></div>
       </div>
     </div>
 
     <div class="panel">
       <h4>What each role can do</h4>
       <div class="kv">
-        <div class="kv-row"><span class="k">Read-only user</span><span class="v">Browse, search, filter and save every published case.</span></div>
-        <div class="kv-row"><span class="k">Verified contributor</span><span class="v">Everything above, plus publishing cases, commenting, and vouching for peers.</span></div>
+        ${roleRow("Read-only user", SESSION.role === "reader", "Browse, search and filter every published case.")}
+        ${roleRow("Verified contributor", SESSION.role === "contributor", "Everything above, plus publishing cases and deleting their own.")}
+        ${roleRow("Admin", SESSION.role === "admin", "Everything above, plus deleting any case, managing users and reading the audit log.")}
         <div class="kv-row"><span class="k">Re-verification</span><span class="v">Annual, to catch lapsed or revoked licenses.</span></div>
       </div>
     </div>
   </div>`);
 
-  view.querySelectorAll("[data-act]").forEach((b) => { b.onclick = () => toast("Document upload — not built in this prototype"); });
+  view.querySelectorAll("[data-act]").forEach((b) => { b.onclick = () => toast("Document upload is not wired up yet"); });
+  return view;
+}
+
+/* ── Login view ──────────────────────────────────────────── */
+function renderLogin() {
+  const view = el(`<div class="login-wrap">
+    <div class="login-card">
+      <div class="login-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3c-2.2 0-3.2 1-5 1S4 3.4 4 6.5c0 3 1 4.6 1.7 7.2.6 2.2.8 6.3 2.6 6.3 1.6 0 1.3-4.5 3.7-4.5s2.1 4.5 3.7 4.5c1.8 0 2-4.1 2.6-6.3C19 11.1 20 9.5 20 6.5 20 3.4 18.8 4 17 4s-2.8-1-5-1z"/>
+        </svg>
+      </div>
+      <h1>Sign in</h1>
+      <p class="login-sub">Clinical case library for verified dentists.</p>
+
+      <form id="loginForm" novalidate>
+        <div class="field">
+          <label for="l-email">Email</label>
+          <input id="l-email" type="text" autocomplete="username"
+                 placeholder="you@example.com" value="admin@dentalinfo.test">
+        </div>
+        <div class="field">
+          <label for="l-pw">Password</label>
+          <input id="l-pw" type="password" autocomplete="current-password"
+                 placeholder="••••••••" value="Admin@12345">
+        </div>
+        <p class="login-error" id="loginError" hidden></p>
+        <button type="submit" class="btn btn-primary btn-block" id="loginBtn">Sign in</button>
+      </form>
+
+      <div class="login-hint">
+        <p><b>Local test accounts</b> — full credentials are in <code>ACCOUNTS.txt</code></p>
+        <div class="login-accounts">
+          <button class="acct-chip" data-e="admin@dentalinfo.test"  data-p="Admin@12345">Admin</button>
+          <button class="acct-chip" data-e="test@dentalinfo.test"   data-p="Test@12345">Contributor</button>
+          <button class="acct-chip" data-e="reader@dentalinfo.test" data-p="Reader@12345">Read-only</button>
+        </div>
+      </div>
+    </div>
+  </div>`);
+
+  const errBox = $("#loginError", view);
+  const btn = $("#loginBtn", view);
+
+  view.querySelectorAll(".acct-chip").forEach((c) => {
+    c.onclick = () => {
+      $("#l-email", view).value = c.dataset.e;
+      $("#l-pw", view).value = c.dataset.p;
+      errBox.hidden = true;
+    };
+  });
+
+  $("#loginForm", view).onsubmit = async (e) => {
+    e.preventDefault();
+    const email = $("#l-email", view).value.trim();
+    const pw = $("#l-pw", view).value;
+    if (!email || !pw) {
+      errBox.textContent = "Enter an email and password.";
+      errBox.hidden = false;
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = "Signing in…";
+    errBox.hidden = true;
+    try {
+      await API.login(email, pw);
+      await refresh();
+      renderAuthSlot();
+      toast(`Signed in as ${SESSION.name}`);
+      location.hash = "#/browse";
+      render();
+    } catch (err) {
+      errBox.textContent = err.message;
+      errBox.hidden = false;
+      btn.disabled = false;
+      btn.textContent = "Sign in";
+    }
+  };
+
   return view;
 }
 
@@ -605,9 +873,11 @@ function render() {
   const hash = location.hash || "#/browse";
   const host = $("#view");
   host.innerHTML = "";
+  renderAuthSlot();
 
   let node, navKey;
-  if (hash.startsWith("#/case/"))           { node = renderCase(hash.slice(7)); navKey = "#/browse"; }
+  if (hash.startsWith("#/login"))           { node = renderLogin();            navKey = null; }
+  else if (hash.startsWith("#/case/"))      { node = renderCase(hash.slice(7)); navKey = "#/browse"; }
   else if (hash.startsWith("#/contribute")) { node = renderContribute();        navKey = "#/contribute"; }
   else if (hash.startsWith("#/verify"))     { node = renderVerify();            navKey = "#/verify"; }
   else                                      { node = renderBrowse();            navKey = "#/browse"; }
@@ -652,13 +922,65 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-$("#roleSelect").addEventListener("change", (e) => {
-  SESSION.role = e.target.value;
-  const label = { reader: "read-only user", pending: "verification pending", contributor: "verified contributor" }[SESSION.role];
-  toast(`Now viewing as: ${label}`);
-  render();
-});
+/* ── Top-bar auth control ────────────────────────────────── */
+function renderAuthSlot() {
+  const slot = $("#authSlot");
+  slot.innerHTML = "";
 
-$("#avatar").textContent = SESSION.initials;
-$("#roleSelect").value = SESSION.role;
-render();
+  if (!signedIn()) {
+    const btn = el(`<a class="btn btn-primary btn-sm" href="#/login">Sign in</a>`);
+    slot.appendChild(btn);
+    return;
+  }
+
+  const roleLabel = { admin: "Admin", contributor: "Contributor", reader: "Read-only" }[SESSION.role]
+                    || SESSION.role;
+  const wrap = el(`<div class="account">
+    <div class="account-meta">
+      <span class="account-name">${esc(SESSION.name)}</span>
+      <span class="account-role${SESSION.is_admin ? " is-admin" : ""}">${esc(roleLabel)}</span>
+    </div>
+    <div class="avatar" title="${esc(SESSION.email)}">${initials(SESSION.name)}</div>
+    <button class="icon-btn" id="signOutBtn" title="Sign out" aria-label="Sign out">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M15 17l5-5-5-5"/><path d="M20 12H9"/><path d="M13 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h7"/>
+      </svg>
+    </button>
+  </div>`);
+  slot.appendChild(wrap);
+
+  $("#signOutBtn", wrap).onclick = async () => {
+    try {
+      await API.logout();
+      await refresh();
+      toast("Signed out");
+      location.hash = "#/browse";
+      render();
+    } catch (err) { toast(err.message); }
+  };
+}
+
+/* ── Boot ────────────────────────────────────────────────── */
+(async function boot() {
+  const host = $("#view");
+  host.innerHTML = `<div class="empty"><h3>Loading…</h3></div>`;
+  try {
+    await refresh();
+  } catch (err) {
+    host.innerHTML = "";
+    host.appendChild(el(`<div class="gate">
+      <div class="gate-icon">${ICON.lock}</div>
+      <h2>Cannot reach the API</h2>
+      <p>The page loaded but <code>/api</code> did not respond. This app now needs
+         its server running — opening <code>index.html</code> straight from disk
+         will not work.</p>
+      <p style="font-size:13px">Start it with <b>python server/app.py</b>, then
+         open <b>http://localhost:8000</b>.</p>
+      <div class="gate-actions">
+        <button class="btn btn-primary" onclick="location.reload()">Retry</button>
+      </div>
+    </div>`));
+    return;
+  }
+  render();
+})();
