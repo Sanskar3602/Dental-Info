@@ -17,16 +17,40 @@ let CASES = [];
 let SESSION = null;       // null = signed out
 
 /* ── API ─────────────────────────────────────────────────── */
+const NO_API_MESSAGE =
+  "No backend at this address. This page is being served without its API — " +
+  "run it locally with “python server/app.py” and open http://localhost:8000.";
+
 const API = {
   async call(method, path, body) {
-    const res = await fetch(path, {
-      method,
-      credentials: "same-origin",
-      headers: body ? { "Content-Type": "application/json" } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let res;
+    try {
+      res = await fetch(path, {
+        method,
+        credentials: "same-origin",
+        headers: body ? { "Content-Type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (netErr) {
+      // fetch itself failed: offline, wrong origin, or opened via file://
+      const err = new Error(NO_API_MESSAGE);
+      err.noApi = true;
+      throw err;
+    }
+
     let payload = null;
-    try { payload = await res.json(); } catch (e) { /* empty body */ }
+    try { payload = await res.json(); } catch (e) { /* not JSON */ }
+
+    // A non-JSON response means we did not reach this app's API at all —
+    // typically a static host returning its own HTML 404 page. Say that,
+    // rather than reporting a bare status code the user cannot act on.
+    if (payload === null && !res.ok) {
+      const err = new Error(NO_API_MESSAGE);
+      err.noApi = true;
+      err.status = res.status;
+      throw err;
+    }
+
     if (!res.ok) {
       const err = new Error((payload && payload.error) || `Request failed (${res.status})`);
       err.status = res.status;
@@ -968,16 +992,27 @@ function renderAuthSlot() {
     await refresh();
   } catch (err) {
     host.innerHTML = "";
+    const where = location.protocol === "file:"
+      ? "You opened this file directly from disk (<code>file://</code>)."
+      : `Nothing is answering <code>/api</code> on <code>${esc(location.host)}</code>.`;
     host.appendChild(el(`<div class="gate">
       <div class="gate-icon">${ICON.lock}</div>
-      <h2>Cannot reach the API</h2>
-      <p>The page loaded but <code>/api</code> did not respond. This app now needs
-         its server running — opening <code>index.html</code> straight from disk
-         will not work.</p>
-      <p style="font-size:13px">Start it with <b>python server/app.py</b>, then
-         open <b>http://localhost:8000</b>.</p>
+      <h2>This build needs its backend</h2>
+      <p>${where} Since moving onto a database, the app loads cases and accounts
+         from its own API, so the static files alone cannot sign you in.</p>
+      <div class="panel" style="text-align:left;margin:18px 0 4px">
+        <h4>Run it locally</h4>
+        <p style="margin:0;font-size:12.5px;line-height:1.7">
+          <code>python server/seed.py</code> &nbsp;— once, creates the accounts<br>
+          <code>python server/app.py</code> &nbsp;— starts the server<br>
+          then open <b>http://localhost:8000</b>
+        </p>
+      </div>
+      <p style="font-size:12.5px;color:var(--ink-4)">Credentials are in
+         <code>ACCOUNTS.txt</code> at the repo root.</p>
       <div class="gate-actions">
         <button class="btn btn-primary" onclick="location.reload()">Retry</button>
+        <a class="btn btn-ghost" href="http://localhost:8000">Open localhost:8000</a>
       </div>
     </div>`));
     return;
