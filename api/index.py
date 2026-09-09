@@ -35,7 +35,12 @@ except Exception as exc:                      # ImportError, or a linker error
     DRIVER_ERROR = "%s: %s" % (type(exc).__name__, exc)
 
 COOKIE_NAME = "dental_info_session"
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+# Be tolerant of how the value was pasted into the dashboard: surrounding
+# whitespace/newlines, or wrapping quotes, are stripped rather than producing
+# an opaque connection failure.
+_RAW_DATABASE_URL = os.environ.get("DATABASE_URL", "") or ""
+DATABASE_URL = _RAW_DATABASE_URL.strip().strip('"').strip("'").strip()
 PERMISSIVE_MODE = os.environ.get("DENTAL_INFO_STRICT", "") not in ("1", "true", "yes")
 
 SESSION_TTL = timedelta(days=7)
@@ -263,6 +268,11 @@ def _health():
         "driver_error": DRIVER_ERROR,
         "database_url_set": bool(DATABASE_URL),
         "database_url_pooled": "-pooler" in DATABASE_URL if DATABASE_URL else None,
+        # length and scheme only — never the credentials. Distinguishes
+        # "variable saved empty" from "variable saved wrong".
+        "database_url_raw_len": len(_RAW_DATABASE_URL),
+        "database_url_len": len(DATABASE_URL),
+        "database_url_scheme": DATABASE_URL.split("://")[0] if "://" in DATABASE_URL else None,
         "permissive_mode": PERMISSIVE_MODE,
         # which Vercel environment is actually serving this request
         "vercel_env": os.environ.get("VERCEL_ENV"),
