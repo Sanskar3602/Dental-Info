@@ -41,12 +41,19 @@ const API = {
     let payload = null;
     try { payload = await res.json(); } catch (e) { /* not JSON */ }
 
-    // A non-JSON response means we did not reach this app's API at all —
-    // typically a static host returning its own HTML 404 page. Say that,
-    // rather than reporting a bare status code the user cannot act on.
+    // A non-JSON error body means we never reached this app's API — the host
+    // answered for it. Distinguish the two cases, because the fix differs:
+    //   404 → no backend deployed at this address
+    //   5xx → backend IS deployed but crashed before it could reply
     if (payload === null && !res.ok) {
-      const err = new Error(NO_API_MESSAGE);
-      err.noApi = true;
+      const err = new Error(
+        res.status >= 500
+          ? `The backend is deployed but crashed (HTTP ${res.status}). ` +
+            `Open /api/health for diagnostics, or check the Vercel function logs.`
+          : NO_API_MESSAGE
+      );
+      err.noApi = res.status < 500;
+      err.crashed = res.status >= 500;
       err.status = res.status;
       throw err;
     }
@@ -992,14 +999,21 @@ function renderAuthSlot() {
     await refresh();
   } catch (err) {
     host.innerHTML = "";
-    const where = location.protocol === "file:"
-      ? "You opened this file directly from disk (<code>file://</code>)."
-      : `Nothing is answering <code>/api</code> on <code>${esc(location.host)}</code>.`;
+    const where = err && err.crashed
+      ? `The API on <code>${esc(location.host)}</code> is deployed but returned
+         <b>HTTP ${err.status}</b> before it could reply.`
+      : location.protocol === "file:"
+        ? "You opened this file directly from disk (<code>file://</code>)."
+        : `Nothing is answering <code>/api</code> on <code>${esc(location.host)}</code>.`;
     host.appendChild(el(`<div class="gate">
       <div class="gate-icon">${ICON.lock}</div>
-      <h2>This build needs its backend</h2>
+      <h2>${err && err.crashed ? "The backend is failing" : "This build needs its backend"}</h2>
       <p>${where} Since moving onto a database, the app loads cases and accounts
          from its own API, so the static files alone cannot sign you in.</p>
+      ${err && err.crashed ? `<p style="font-size:13px">
+        <a href="/api/health" style="color:var(--accent);font-weight:600">Open /api/health</a>
+        — it reports whether the driver loaded, whether <code>DATABASE_URL</code> is
+        set, and whether the tables exist.</p>` : ""}
       <div class="panel" style="text-align:left;margin:18px 0 4px">
         <h4>Run it locally</h4>
         <p style="margin:0;font-size:12.5px;line-height:1.7">

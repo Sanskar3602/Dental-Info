@@ -105,6 +105,7 @@ curl https://dental-info.vercel.app/api/health
 | `{"error":"DATABASE_URL is not set..."}` | Step 3 missed, or no redeploy after adding the variable |
 | `{"error":"Could not connect..."}` | Wrong string, or you used the non-pooled URL |
 | Vercel HTML 404 | `vercel.json` didn't deploy, or the build failed — check the build log |
+| `FUNCTION_INVOCATION_FAILED` (500) | The function crashed before running. Was caused by a sibling `import _db`; that module is now inlined into `api/index.py`. If it recurs, check the Vercel build log for a failed `psycopg2-binary` install. |
 
 Then open **https://dental-info.vercel.app** and sign in with the admin account.
 
@@ -116,8 +117,7 @@ Then open **https://dental-info.vercel.app** and sign in with the admin account.
 |---|---|
 | `vercel.json` | Rewrites `/api/*` to the one Python function |
 | `requirements.txt` | `psycopg2-binary` (deployed only — local needs nothing) |
-| `api/index.py` | The whole API as a WSGI app |
-| `api/_db.py` | Postgres data + auth layer (files starting `_` aren't routes) |
+| `api/index.py` | The whole API as a WSGI app — **one self-contained file**, no sibling imports (those crashed on Vercel) |
 | `server/schema_postgres.sql` | Postgres schema — JSONB list columns, GIN indexes |
 | `server/migrate_postgres.py` | Applies the schema and seeds; `--reset`, `--check` |
 | `server/` (rest) | The local SQLite server, unchanged |
