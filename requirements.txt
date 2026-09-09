@@ -1,3 +1,6 @@
 # Vercel serverless (api/) dependencies.
 # The LOCAL server (server/app.py) needs none of this — it is stdlib only.
-psycopg2-binary==2.9.10
+#
+# Deliberately a floor, not an exact pin: Vercel chooses the Python version,
+# and an exact pin can leave no matching wheel for that interpreter.
+psycopg2-binary>=2.9.9,<3
