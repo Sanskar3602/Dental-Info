@@ -134,8 +134,9 @@ Fine for testing; **not** hardened for real users:
 - **No rate limiting on `/api/login`.** Add it before the URL is shared widely.
 - **No CSRF protection** on state-changing routes. The cookie is `SameSite=Lax`,
   which blocks the common cross-site cases but is not a substitute.
-- **Permissions are permissive** — every signed-in account has full access, as
-  you asked. Set `DENTAL_INFO_STRICT=1` in the Vercel env vars to enforce roles.
+- **Permissions are enforced**: admin deletes any case, a contributor deletes
+  only their own, a read-only account deletes nothing. `DENTAL_INFO_PERMISSIVE=1`
+  bypasses this for debugging — do not set it in production.
 - **Change the seeded passwords.** They're in a gitignored file, but they're
   known-weak and documented in this repo's history.
 - Session tokens are stored unhashed; a database read would expose live

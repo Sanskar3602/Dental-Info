@@ -41,7 +41,10 @@ COOKIE_NAME = "dental_info_session"
 # an opaque connection failure.
 _RAW_DATABASE_URL = os.environ.get("DATABASE_URL", "") or ""
 DATABASE_URL = _RAW_DATABASE_URL.strip().strip('"').strip("'").strip()
-PERMISSIVE_MODE = os.environ.get("DENTAL_INFO_STRICT", "") not in ("1", "true", "yes")
+# Role enforcement is the DEFAULT. Admins delete any case, contributors
+# delete only their own, read-only accounts delete nothing. Permissive mode
+# is now an explicit opt-in for debugging, not the default.
+PERMISSIVE_MODE = os.environ.get("DENTAL_INFO_PERMISSIVE", "") in ("1", "true", "yes")
 
 SESSION_TTL = timedelta(days=7)
 PBKDF2_ITERATIONS = 240_000
@@ -120,6 +123,8 @@ def public_user(row):
         "reverify_due": row["reverify_due"],
         "can_post": can(row, "post.create"),
         "can_delete_any": can(row, "post.delete_any"),
+        "can_delete_own": can(row, "post.delete_own"),
+        "can_comment": can(row, "comment.create"),
         "is_admin": row["role"] == "admin",
         "permissive_mode": PERMISSIVE_MODE,
     }
@@ -447,8 +452,11 @@ def app(environ, start_response):
                         own = post["author"]["id"] == me["id"]
                         if not (can(me, "post.delete_any")
                                 or (own and can(me, "post.delete_own"))):
+                            # distinguish "not yours" from "you cannot delete at all"
                             return _err(start_response, 403,
-                                        "You can only delete your own cases")
+                                        "You can only delete your own cases"
+                                        if can(me, "post.delete_own")
+                                        else "Your account is read-only and cannot delete cases")
                         cur.execute("DELETE FROM posts WHERE id = %s", (post_id,))
                         audit(cur, me["id"], "post.delete", post_id, post["title"])
                         return _json(start_response, {"ok": True, "deleted": post_id})

@@ -28,13 +28,15 @@ SCHEMA_PATH = BASE_DIR / "schema.sql"
 # ---------------------------------------------------------------------------
 # Permissions
 #
-# The user asked that, for now, every account have full access. Rather than
-# stripping roles out of the model (CLAUDE.md is explicit that contributor
-# must stay a distinct role), permissions are enforced through one function
-# with a single override flag. Set PERMISSIVE_MODE = False -- or the env var
-# DENTAL_INFO_STRICT=1 -- and real role enforcement resumes immediately.
+# Roles are ENFORCED by default:
+#   admin       -> delete any case, manage users, read the audit log
+#   contributor -> publish, and delete only their OWN cases
+#   reader      -> read only; cannot publish, comment or delete anything
+# Ownership is checked separately from the role grant, so a contributor
+# cannot touch another dentist's case.
+# Set DENTAL_INFO_PERMISSIVE=1 to bypass all checks (debugging only).
 # ---------------------------------------------------------------------------
-PERMISSIVE_MODE = os.environ.get("DENTAL_INFO_STRICT", "") not in ("1", "true", "yes")
+PERMISSIVE_MODE = os.environ.get("DENTAL_INFO_PERMISSIVE", "") in ("1", "true", "yes")
 
 SESSION_TTL = timedelta(days=7)
 PBKDF2_ITERATIONS = 240_000
@@ -147,6 +149,8 @@ def public_user(row) -> dict:
         # what the UI should let this account do
         "can_post": can(row, "post.create"),
         "can_delete_any": can(row, "post.delete_any"),
+        "can_delete_own": can(row, "post.delete_own"),
+        "can_comment": can(row, "comment.create"),
         "is_admin": row["role"] == "admin",
         "permissive_mode": PERMISSIVE_MODE,
     }

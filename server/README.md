@@ -66,34 +66,35 @@ and the placeholder style (`?` → `%s`).
 
 ## Permissions
 
-Right now **every signed-in account has full access**, as requested. That is one
-flag, not a missing feature — roles are stored per account and every check runs
-through a single function:
+Roles are **enforced by default**. Every check runs through one function:
 
 ```python
 # store.py
-PERMISSIVE_MODE = os.environ.get("DENTAL_INFO_STRICT", "") not in ("1","true","yes")
+PERMISSIVE_MODE = os.environ.get("DENTAL_INFO_PERMISSIVE", "") in ("1","true","yes")
 
 def can(user_row, action):
-    if PERMISSIVE_MODE:
-        return True          # ← the override
+    if PERMISSIVE_MODE:      # debugging escape hatch, off by default
+        return True
     return action in ROLE_GRANTS.get(user_row["role"], set())
 ```
 
-Turn real enforcement on:
+Deleting also checks **ownership**, separately from the role grant, so a
+contributor cannot touch another dentist's case.
+
+Bypass every check while debugging (not the default):
 
 ```powershell
-$env:DENTAL_INFO_STRICT=1 ; python server/app.py     # PowerShell
-DENTAL_INFO_STRICT=1 python server/app.py            # bash
+$env:DENTAL_INFO_PERMISSIVE=1 ; python server/app.py   # PowerShell
+DENTAL_INFO_PERMISSIVE=1 python server/app.py          # bash
 ```
 
-Verified behaviour with it on:
+Verified behaviour:
 
 | | admin | contributor | reader |
 |---|---|---|---|
 | publish a case | yes | yes | **403** |
-| delete own case | yes | yes | — |
-| delete someone else's | yes | **403** | — |
+| delete own case | yes | yes | **403** |
+| delete someone else's | yes | **403** | **403** |
 | read audit log | yes | **403** | **403** |
 
 Keeping roles in the model is deliberate — CLAUDE.md requires contributor to stay

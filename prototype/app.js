@@ -118,11 +118,22 @@ const verifiedBadge = () => `<span class="verified">${ICON.check}Verified</span>
 
 /* Authorisation questions, answered by the server and mirrored here so the
    UI can hide what the API would refuse. The server is the real gate. */
-const signedIn     = () => SESSION !== null;
-const canPost      = () => !!(SESSION && SESSION.can_post);
-const isAdmin      = () => !!(SESSION && SESSION.is_admin);
-const canDelete    = (c) => !!(SESSION && (SESSION.can_delete_any ||
-                          (c && c.author && c.author.id === SESSION.id)));
+const signedIn  = () => SESSION !== null;
+const canPost   = () => !!(SESSION && SESSION.can_post);
+const isAdmin   = () => !!(SESSION && SESSION.is_admin);
+const canComment = () => !!(SESSION && SESSION.can_comment);
+const isMine    = (c) => !!(SESSION && c && c.author && c.author.id === SESSION.id);
+
+/* Mirrors the server's rule exactly:
+     admin       -> any case          (can_delete_any)
+     contributor -> only their own    (can_delete_own + ownership)
+     reader      -> nothing           (neither grant)
+   Previously this treated ownership alone as sufficient, which would offer
+   Delete to a read-only account on its own case. The server would still have
+   refused, but the button should never have been there. */
+const canDelete = (c) => !!(SESSION && (
+  SESSION.can_delete_any || (SESSION.can_delete_own && isMine(c))
+));
 
 /* Difficulty as an ordinal 3-step meter. The text label is always
    rendered alongside, so the hue never carries the meaning alone. */
@@ -420,7 +431,7 @@ function renderCase(id) {
                 </div></div>`).join("")
             : `<p style="color:var(--ink-4);font-size:13.5px">No discussion yet.</p>`}
           <div style="margin-top:18px">
-            ${canPost()
+            ${canComment()
               ? `<button class="btn btn-ghost btn-sm" id="addComment">${ICON.msg} Add a clinical comment</button>`
               : `<div style="display:flex;align-items:center;gap:9px;color:var(--ink-4);font-size:13px">
                    <span style="width:15px;height:15px;display:inline-block;flex-shrink:0">${ICON.lock}</span>
@@ -438,9 +449,9 @@ function renderCase(id) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></svg>
             Delete case
           </button>
-          <p class="panel-note">${SESSION.can_delete_any && c.author.id !== SESSION.id
+          <p class="panel-note">${!isMine(c)
             ? "You are deleting another dentist’s case as an admin."
-            : "This removes the case permanently."}</p>` : ""}
+            : "This is your case. Deleting removes it permanently."}</p>` : ""}
         </div>
         <div class="panel">
           <h4>Tools &amp; materials used</h4>
@@ -777,9 +788,12 @@ function renderVerify() {
         <div class="kv-row"><span class="k">Role</span><span class="v">${esc(SESSION.role)}</span></div>
         <div class="kv-row"><span class="k">Credential</span><span class="v">${esc(SESSION.credential || "—")}</span></div>
         <div class="kv-row"><span class="k">Effective rights</span><span class="v">${
-          [SESSION.can_post ? "publish" : null,
-           SESSION.can_delete_any ? "delete any case" : "delete own cases",
-           SESSION.is_admin ? "manage users" : null].filter(Boolean).join(" · ")
+          [SESSION.can_post ? "publish cases" : "browse only",
+           SESSION.can_delete_any ? "delete any case"
+             : (SESSION.can_delete_own ? "delete own cases" : null),
+           SESSION.can_comment ? "comment" : null,
+           SESSION.is_admin ? "manage users · read audit log" : null
+          ].filter(Boolean).join(" · ")
         }</span></div>
       </div>
     </div>

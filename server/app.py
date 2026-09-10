@@ -218,8 +218,11 @@ class Handler(SimpleHTTPRequestHandler):
                 allowed = (store.can(user, "post.delete_any")
                            or (own and store.can(user, "post.delete_own")))
                 if not allowed:
-                    return self._error(HTTPStatus.FORBIDDEN,
-                                       "You can only delete your own cases")
+                    return self._error(
+                        HTTPStatus.FORBIDDEN,
+                        "You can only delete your own cases"
+                        if store.can(user, "post.delete_own")
+                        else "Your account is read-only and cannot delete cases")
 
                 store.delete_post(conn, post_id)
                 store.audit(conn, actor_id=user["id"], action="post.delete",
