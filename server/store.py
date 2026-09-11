@@ -247,7 +247,7 @@ def attach_comments(conn, posts):
         "SELECT c.post_id, c.body, c.created_at, u.name AS author_name, "
         "       u.verification_status AS author_verification "
         "  FROM comments c JOIN users u ON u.id = c.author_id "
-        f" WHERE c.post_id IN ({marks}) ORDER BY c.created_at ASC",
+        f" WHERE c.post_id IN ({marks}) ORDER BY c.created_at ASC, c.id ASC",
         [p["id"] for p in posts]).fetchall()
     grouped = {}
     for r in rows:

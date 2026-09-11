@@ -184,7 +184,8 @@ def seed_comments(cur):
             cur.execute("INSERT INTO comments (id,post_id,author_id,body,created_at) "
                         "VALUES (%s,%s,%s,%s,%s)",
                         (cid, case["id"], author_id, m["text"],
-                         (m.get("date") or "") + "T12:00:00+00:00"))
+                         # +i minutes: a reply must be later than its question
+                         (m.get("date") or "") + "T12:%02d:00+00:00" % i))
             made += 1
     print(f"  imported comments {made}")
 

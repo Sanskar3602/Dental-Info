@@ -172,7 +172,8 @@ def seed_comments(conn) -> int:
                 "INSERT INTO comments (id,post_id,author_id,body,created_at) "
                 "VALUES (?,?,?,?,?)",
                 (cid, case["id"], author_id, m["text"],
-                 (m.get("date") or "") + "T12:00:00+00:00"))
+                 # +i minutes: a reply must be later than the question it answers
+                 (m.get("date") or "") + "T12:%02d:00+00:00" % i))
             made += 1
     print(f"  imported comments {made}")
     return made

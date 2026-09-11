@@ -173,7 +173,7 @@ def _attach_comments(cur, posts):
                   u.name AS author_name, u.verification_status AS author_verification
              FROM comments c JOIN users u ON u.id = c.author_id
             WHERE c.post_id = ANY(%s)
-         ORDER BY c.created_at ASC""",
+         ORDER BY c.created_at ASC, c.id ASC""",
         ([p["id"] for p in posts],))
     grouped = {}
     for r in cur.fetchall():
