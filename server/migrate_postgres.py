@@ -68,7 +68,7 @@ def connect(url):
 
 def counts(cur):
     out = {}
-    for t in ("users", "posts", "sessions", "audit_log"):
+    for t in ("users", "posts", "comments", "sessions", "audit_log"):
         try:
             cur.execute(f"SELECT COUNT(*) AS n FROM {t}")
             out[t] = cur.fetchone()["n"]
