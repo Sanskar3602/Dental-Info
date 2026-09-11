@@ -875,3 +875,27 @@ html::before{
   .account-meta{display:none}
   .auth-slot{padding-left:8px;border-left:0}
 }
+
+/* ── Signup / verification queue ─────────────────────────── */
+.opt{
+  font-weight:500;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--ink-4);margin-left:5px;
+}
+.login-card .field-row{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+
+.vreq{margin-bottom:14px}
+.vreq-head{display:flex;align-items:flex-start;gap:12px;justify-content:space-between}
+.vreq-name{font-size:15px;font-weight:600}
+.vreq-sub{font-size:12.5px;color:var(--ink-4);margin-top:2px}
+.vreq-registry{
+  display:flex;flex-direction:column;gap:3px;
+  padding:11px 13px;border-radius:var(--r-md);
+  background:var(--amber-100);border:1px solid var(--amber-700);
+  font-size:12.5px;color:var(--amber-700);
+}
+.vreq-registry b{font-weight:700}
+.vreq-registry span{opacity:.9}
+.vreq-actions{display:flex;gap:9px;justify-content:flex-end;margin-top:15px;
+  padding-top:14px;border-top:1px solid var(--line);flex-wrap:wrap}
+
+@media (max-width:860px){ .login-card .field-row{grid-template-columns:1fr} }

@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import sqlite3
 import uuid
@@ -313,6 +314,119 @@ def create_post(conn, *, author_id: str, data: dict) -> str:
 def delete_post(conn, post_id: str) -> bool:
     cur = conn.execute("DELETE FROM posts WHERE id = ?", (post_id,))
     return cur.rowcount > 0
+
+
+# ── signup validation ──────────────────────────────────────────────────────
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
+MIN_PASSWORD = 10
+
+
+def validate_signup(body):
+    """Returns an error string, or None when the payload is acceptable."""
+    email = (body.get("email") or "").strip().lower()
+    name = (body.get("name") or "").strip()
+    pw = body.get("password") or ""
+    if not EMAIL_RE.match(email):
+        return "Enter a valid email address"
+    if len(name) < 2:
+        return "Enter your full name"
+    if len(pw) < MIN_PASSWORD:
+        return f"Password must be at least {MIN_PASSWORD} characters"
+    if pw.lower() in (email, email.split("@")[0], name.lower()):
+        return "Password must not be your name or email"
+    if len(set(pw)) < 4:
+        return "Password is too repetitive"
+    return None
+
+
+# No licensing-registry integration exists yet and CLAUDE.md leaves the launch
+# region open, so report honestly rather than faking a pass.
+REGISTRIES = {
+    "india": "Dental Council of India / state dental council",
+    "in": "Dental Council of India / state dental council",
+    "united states": "State dental board / NPI registry",
+    "us": "State dental board / NPI registry",
+    "usa": "State dental board / NPI registry",
+    "united kingdom": "General Dental Council (GDC)",
+    "uk": "General Dental Council (GDC)",
+}
+
+
+def registry_check(country):
+    who = REGISTRIES.get((country or "").strip().lower())
+    if who:
+        return "unavailable", f"No automated integration yet. Verify manually against: {who}"
+    return "unavailable", (f"No registry integration for {country!r}. Verify manually "
+                           "against the issuing board named on the certificate.")
+
+
+# ── verification requests ──────────────────────────────────────────────────
+def latest_request(conn, user_id):
+    return conn.execute(
+        "SELECT * FROM verification_requests WHERE user_id = ? "
+        "ORDER BY created_at DESC LIMIT 1", (user_id,)).fetchone()
+
+
+def pending_request(conn, user_id):
+    return conn.execute(
+        "SELECT 1 FROM verification_requests WHERE user_id = ? AND status = 'pending'",
+        (user_id,)).fetchone()
+
+
+def create_request(conn, user_id, *, number, board, country, credential=None,
+                   document_note=None):
+    check, detail = registry_check(country)
+    rid = new_id()
+    ts = now_iso()
+    conn.execute(
+        """INSERT INTO verification_requests
+             (id,user_id,license_number,license_board,license_country,credential,
+              registry_check,registry_detail,document_note,status,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,'pending',?)""",
+        (rid, user_id, number, board, country, credential, check, detail,
+         document_note, ts))
+    conn.execute(
+        "UPDATE users SET verification_status='pending', license_number=?,"
+        " license_board=?, license_country=?, credential=COALESCE(?,credential),"
+        " updated_at=? WHERE id=?",
+        (number, board, country, credential, ts, user_id))
+    return rid
+
+
+def get_request(conn, rid):
+    return conn.execute("SELECT * FROM verification_requests WHERE id = ?",
+                        (rid,)).fetchone()
+
+
+def queue(conn):
+    return conn.execute(
+        """SELECT v.*, u.name AS user_name, u.email AS user_email,
+                  u.location AS user_location, u.role AS user_role
+             FROM verification_requests v JOIN users u ON u.id = v.user_id
+            WHERE v.status = 'pending' ORDER BY v.created_at ASC""").fetchall()
+
+
+def decide_request(conn, rid, *, reviewer_id, approve, note=None):
+    vreq = get_request(conn, rid)
+    ts = now_iso()
+    if approve:
+        due = (datetime.now(timezone.utc) + timedelta(days=365)
+               ).replace(microsecond=0).isoformat()
+        # never demote an admin to contributor
+        conn.execute(
+            "UPDATE users SET verification_status='verified',"
+            " role = CASE WHEN role='admin' THEN 'admin' ELSE 'contributor' END,"
+            " verified_at=?, reverify_due=?, updated_at=? WHERE id=?",
+            (ts, due, ts, vreq["user_id"]))
+        status = "approved"
+    else:
+        conn.execute("UPDATE users SET verification_status='unverified', updated_at=?"
+                     " WHERE id=?", (ts, vreq["user_id"]))
+        status = "rejected"
+    conn.execute("UPDATE verification_requests SET status=?, reviewer_id=?,"
+                 " reviewer_note=?, decided_at=? WHERE id=?",
+                 (status, reviewer_id, note, ts, rid))
+    return get_request(conn, rid)
 
 
 # ── audit ──────────────────────────────────────────────────────────────────

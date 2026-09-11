@@ -16,6 +16,7 @@ Local development does NOT use this file — run server/app.py (SQLite) instead.
 import hashlib
 import json
 import os
+import re
 import secrets
 import sys
 import uuid
@@ -211,6 +212,68 @@ def create_session(cur, user_id):
     return token
 
 
+# ── signup validation ──────────────────────────────────────────────────────
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
+MIN_PASSWORD = 10
+
+
+def validate_signup(body):
+    """Returns an error string, or None when the payload is acceptable."""
+    email = (body.get("email") or "").strip().lower()
+    name = (body.get("name") or "").strip()
+    pw = body.get("password") or ""
+    if not EMAIL_RE.match(email):
+        return "Enter a valid email address"
+    if len(name) < 2:
+        return "Enter your full name"
+    if len(pw) < MIN_PASSWORD:
+        return "Password must be at least %d characters" % MIN_PASSWORD
+    if pw.lower() in (email, email.split("@")[0], name.lower()):
+        return "Password must not be your name or email"
+    if len(set(pw)) < 4:
+        return "Password is too repetitive"
+    return None
+
+
+def create_user(cur, email, name, password, role="reader", credential=None,
+                location=None, verification_status="unverified"):
+    uid = new_id()
+    pw_hash, salt, iters = hash_password(password)
+    ts = now_iso()
+    cur.execute(
+        """INSERT INTO users (id,email,name,credential,location,
+                              password_hash,password_salt,password_iterations,
+                              role,verification_status,created_at,updated_at)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+        (uid, email.strip().lower(), name.strip(), credential, location,
+         pw_hash, salt, iters, role, verification_status, ts, ts))
+    return uid
+
+
+# ── registry cross-check ───────────────────────────────────────────────────
+# No licensing-registry integration exists yet, and CLAUDE.md leaves the
+# launch region open. Rather than fake a result, report honestly that the
+# automatic check could not run, and name the registry a human should use.
+REGISTRIES = {
+    "india": "Dental Council of India / state dental council",
+    "in": "Dental Council of India / state dental council",
+    "united states": "State dental board / NPI registry",
+    "us": "State dental board / NPI registry",
+    "usa": "State dental board / NPI registry",
+    "united kingdom": "General Dental Council (GDC)",
+    "uk": "General Dental Council (GDC)",
+}
+
+
+def registry_check(country):
+    key = (country or "").strip().lower()
+    who = REGISTRIES.get(key)
+    if who:
+        return "unavailable", ("No automated integration yet. Verify manually against: %s" % who)
+    return "unavailable", ("No registry integration for %r. Verify manually against the "
+                           "issuing board named on the certificate." % (country or "unknown"))
+
+
 def audit(cur, actor_id, action, target=None, detail=None):
     cur.execute("INSERT INTO audit_log (id,actor_id,action,target,detail,created_at) "
                 "VALUES (%s,%s,%s,%s,%s,%s)",
@@ -379,6 +442,155 @@ def app(environ, start_response):
                         cur.execute("DELETE FROM sessions WHERE token = %s", (tok,))
                     return _json(start_response, {"ok": True},
                                  cookie=_cookie(None, environ, clear=True))
+
+                # -- signup ------------------------------------------------
+                if path == "/api/signup":
+                    if method != "POST":
+                        return _err(start_response, 405, "Use POST")
+                    body = _body(environ)
+                    if body is None:
+                        return _err(start_response, 400, "Body must be valid JSON")
+                    problem = validate_signup(body)
+                    if problem:
+                        return _err(start_response, 400, problem)
+                    email = body["email"].strip().lower()
+                    if get_user_by_email(cur, email):
+                        return _err(start_response, 409,
+                                    "That email is already registered. Try signing in.")
+                    uid = create_user(cur, email, body["name"], body["password"],
+                                      role="reader",
+                                      credential=(body.get("credential") or "").strip() or None,
+                                      location=(body.get("location") or "").strip() or None)
+                    audit(cur, uid, "user.signup", email)
+                    cur.execute("SELECT * FROM users WHERE id = %s", (uid,))
+                    row = cur.fetchone()
+                    token = create_session(cur, uid)   # sign them straight in
+                    return _json(start_response, {"user": public_user(row)},
+                                 201, cookie=_cookie(token, environ))
+
+                # -- verification: submit / read own status -----------------
+                if path == "/api/verification":
+                    if me is None:
+                        return _err(start_response, 401, "Not signed in")
+
+                    if method == "GET":
+                        cur.execute(
+                            "SELECT * FROM verification_requests WHERE user_id = %s "
+                            "ORDER BY created_at DESC LIMIT 1", (me["id"],))
+                        r = cur.fetchone()
+                        return _json(start_response, {"request": dict(r) if r else None})
+
+                    if method != "POST":
+                        return _err(start_response, 405, "Use GET or POST")
+
+                    body = _body(environ)
+                    if body is None:
+                        return _err(start_response, 400, "Body must be valid JSON")
+                    num = (body.get("license_number") or "").strip()
+                    board = (body.get("license_board") or "").strip()
+                    country = (body.get("license_country") or "").strip()
+                    if len(num) < 3:
+                        return _err(start_response, 400, "Enter your license number")
+                    if len(board) < 3:
+                        return _err(start_response, 400, "Enter the issuing board or council")
+                    if len(country) < 2:
+                        return _err(start_response, 400, "Enter the country of registration")
+
+                    cur.execute("SELECT 1 FROM verification_requests "
+                                "WHERE user_id = %s AND status = 'pending'", (me["id"],))
+                    if cur.fetchone():
+                        return _err(start_response, 409,
+                                    "You already have a verification request under review.")
+
+                    check, detail = registry_check(country)
+                    rid = new_id()
+                    ts = now_iso()
+                    cur.execute(
+                        """INSERT INTO verification_requests
+                             (id,user_id,license_number,license_board,license_country,
+                              credential,registry_check,registry_detail,document_note,
+                              status,created_at)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending',%s)""",
+                        (rid, me["id"], num, board, country,
+                         (body.get("credential") or "").strip() or None,
+                         check, detail,
+                         (body.get("document_note") or "").strip() or None, ts))
+                    cur.execute(
+                        "UPDATE users SET verification_status='pending', license_number=%s,"
+                        " license_board=%s, license_country=%s,"
+                        " credential=COALESCE(%s,credential), updated_at=%s WHERE id=%s",
+                        (num, board, country,
+                         (body.get("credential") or "").strip() or None, ts, me["id"]))
+                    audit(cur, me["id"], "verification.submit", rid, board)
+                    cur.execute("SELECT * FROM verification_requests WHERE id = %s", (rid,))
+                    return _json(start_response, {"request": dict(cur.fetchone())}, 201)
+
+                # -- the review queue (admin) ------------------------------
+                if path == "/api/verification/queue":
+                    if me is None:
+                        return _err(start_response, 401, "Not signed in")
+                    if not can(me, "user.manage"):
+                        return _err(start_response, 403, "Admin only")
+                    cur.execute(
+                        """SELECT v.*, u.name AS user_name, u.email AS user_email,
+                                  u.location AS user_location, u.role AS user_role
+                             FROM verification_requests v
+                             JOIN users u ON u.id = v.user_id
+                            WHERE v.status = 'pending'
+                         ORDER BY v.created_at ASC""")
+                    return _json(start_response,
+                                 {"requests": [dict(r) for r in cur.fetchall()]})
+
+                # -- approve / reject (admin) ------------------------------
+                if path.startswith("/api/verification/") and path.endswith("/decide"):
+                    if method != "POST":
+                        return _err(start_response, 405, "Use POST")
+                    if me is None:
+                        return _err(start_response, 401, "Not signed in")
+                    if not can(me, "user.manage"):
+                        return _err(start_response, 403, "Admin only")
+                    rid = path.split("/")[3]
+                    body = _body(environ) or {}
+                    decision = (body.get("decision") or "").strip()
+                    if decision not in ("approve", "reject"):
+                        return _err(start_response, 400,
+                                    "decision must be 'approve' or 'reject'")
+                    note = (body.get("note") or "").strip() or None
+                    if decision == "reject" and not note:
+                        return _err(start_response, 400,
+                                    "A rejection needs a reason the applicant can act on")
+
+                    cur.execute("SELECT * FROM verification_requests WHERE id = %s", (rid,))
+                    vreq = cur.fetchone()
+                    if not vreq:
+                        return _err(start_response, 404, "Request not found")
+                    if vreq["status"] != "pending":
+                        return _err(start_response, 409,
+                                    "That request was already %s" % vreq["status"])
+
+                    ts = now_iso()
+                    if decision == "approve":
+                        due = (datetime.now(timezone.utc) + timedelta(days=365)
+                               ).replace(microsecond=0).isoformat()
+                        cur.execute(
+                            "UPDATE users SET verification_status='verified',"
+                            " role = CASE WHEN role='admin' THEN 'admin' ELSE 'contributor' END,"
+                            " verified_at=%s, reverify_due=%s, updated_at=%s WHERE id=%s",
+                            (ts, due, ts, vreq["user_id"]))
+                        cur.execute("UPDATE verification_requests SET status='approved',"
+                                    " reviewer_id=%s, reviewer_note=%s, decided_at=%s"
+                                    " WHERE id=%s", (me["id"], note, ts, rid))
+                    else:
+                        cur.execute("UPDATE users SET verification_status='unverified',"
+                                    " updated_at=%s WHERE id=%s", (ts, vreq["user_id"]))
+                        cur.execute("UPDATE verification_requests SET status='rejected',"
+                                    " reviewer_id=%s, reviewer_note=%s, decided_at=%s"
+                                    " WHERE id=%s", (me["id"], note, ts, rid))
+
+                    audit(cur, me["id"], "verification." + decision, rid,
+                          vreq["license_board"])
+                    cur.execute("SELECT * FROM verification_requests WHERE id = %s", (rid,))
+                    return _json(start_response, {"request": dict(cur.fetchone())})
 
                 if path == "/api/posts":
                     if method == "GET":

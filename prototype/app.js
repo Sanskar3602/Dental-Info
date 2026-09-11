@@ -71,6 +71,13 @@ const API = {
   posts:     ()          => API.call("GET", "/api/posts"),
   createPost:(data)      => API.call("POST", "/api/posts", data),
   deletePost:(id)        => API.call("DELETE", "/api/posts/" + encodeURIComponent(id)),
+
+  signup:    (data)      => API.call("POST", "/api/signup", data),
+  myRequest: ()          => API.call("GET", "/api/verification"),
+  submitLicense:(data)   => API.call("POST", "/api/verification", data),
+  vQueue:    ()          => API.call("GET", "/api/verification/queue"),
+  decide:    (id, d, n)  => API.call("POST", `/api/verification/${encodeURIComponent(id)}/decide`,
+                                     { decision: d, note: n }),
 };
 
 /* Pull fresh session + cases, then repaint. */
@@ -810,14 +817,7 @@ function renderVerify() {
       </ul>
     </div>
 
-    <div class="panel" style="margin-bottom:14px">
-      <h4>License on file</h4>
-      <div class="kv">
-        <div class="kv-row"><span class="k">License number</span><span class="v">${esc(SESSION.license.number || "Not submitted")}</span></div>
-        <div class="kv-row"><span class="k">Issuing board</span><span class="v">${esc(SESSION.license.board || "Not submitted")}</span></div>
-        <div class="kv-row"><span class="k">Country</span><span class="v">${esc(SESSION.license.country || "—")}</span></div>
-      </div>
-    </div>
+    <div id="licenseSlot"></div>
 
     <div class="panel">
       <h4>What each role can do</h4>
@@ -831,6 +831,115 @@ function renderVerify() {
   </div>`);
 
   view.querySelectorAll("[data-act]").forEach((b) => { b.onclick = () => toast("Document upload is not wired up yet"); });
+
+  /* The license section is live: submit when unverified, status when pending. */
+  const slot = $("#licenseSlot", view);
+  slot.appendChild(el(`<div class="panel"><h4>License</h4>
+    <p style="margin:0;font-size:13px;color:var(--ink-4)">Loading…</p></div>`));
+
+  (async () => {
+    let request = null;
+    try { ({ request } = await API.myRequest()); } catch (e) { /* show the form anyway */ }
+    slot.innerHTML = "";
+
+    if (status === "pending") {
+      slot.appendChild(el(`<div class="panel" style="margin-bottom:14px">
+        <h4>Submitted for review</h4>
+        <div class="kv">
+          <div class="kv-row"><span class="k">License number</span><span class="v">${esc(SESSION.license.number || "—")}</span></div>
+          <div class="kv-row"><span class="k">Issuing board</span><span class="v">${esc(SESSION.license.board || "—")}</span></div>
+          <div class="kv-row"><span class="k">Country</span><span class="v">${esc(SESSION.license.country || "—")}</span></div>
+          ${request ? `<div class="kv-row"><span class="k">Submitted</span><span class="v">${fmtDate((request.created_at || "").slice(0,10))}</span></div>` : ""}
+          ${request ? `<div class="kv-row"><span class="k">Registry check</span><span class="v">${esc(request.registry_check)}${request.registry_detail ? " — " + esc(request.registry_detail) : ""}</span></div>` : ""}
+        </div>
+        <p class="panel-note">An administrator reviews each submission against the
+           issuing board. You keep read access in the meantime.</p>
+      </div>`));
+      return;
+    }
+
+    if (status === "verified") {
+      slot.appendChild(el(`<div class="panel" style="margin-bottom:14px">
+        <h4>License on file</h4>
+        <div class="kv">
+          <div class="kv-row"><span class="k">License number</span><span class="v">${esc(SESSION.license.number || "—")}</span></div>
+          <div class="kv-row"><span class="k">Issuing board</span><span class="v">${esc(SESSION.license.board || "—")}</span></div>
+          <div class="kv-row"><span class="k">Country</span><span class="v">${esc(SESSION.license.country || "—")}</span></div>
+          ${request && request.reviewer_note ? `<div class="kv-row"><span class="k">Reviewer note</span><span class="v">${esc(request.reviewer_note)}</span></div>` : ""}
+        </div>
+      </div>`));
+      return;
+    }
+
+    /* unverified, lapsed, or previously rejected -> let them apply */
+    const rejected = request && request.status === "rejected";
+    const form = el(`<div class="panel" style="margin-bottom:14px">
+      <h4>${rejected ? "Re-submit your license" : "Submit your license for verification"}</h4>
+      ${rejected ? `<div class="login-error" style="margin-bottom:14px">
+        <b>Previously rejected.</b> ${esc(request.reviewer_note || "No reason recorded.")}
+      </div>` : ""}
+      <form id="licForm">
+        <div class="field">
+          <label for="v-num">License / registration number</label>
+          <input id="v-num" type="text" placeholder="e.g. KA-DEN-48291"
+                 value="${esc(SESSION.license.number || "")}">
+        </div>
+        <div class="field">
+          <label for="v-board">Issuing board or council</label>
+          <input id="v-board" type="text" placeholder="e.g. Karnataka State Dental Council"
+                 value="${esc(SESSION.license.board || "")}">
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="v-country">Country of registration</label>
+            <input id="v-country" type="text" placeholder="India"
+                   value="${esc(SESSION.license.country || "")}">
+          </div>
+          <div class="field">
+            <label for="v-cred">Credential <span class="opt">optional</span></label>
+            <input id="v-cred" type="text" placeholder="MDS Endodontics"
+                   value="${esc(SESSION.credential || "")}">
+          </div>
+        </div>
+        <div class="field">
+          <label for="v-note">Anything the reviewer should know <span class="opt">optional</span></label>
+          <input id="v-note" type="text" placeholder="e.g. Registered under my maiden name, Nair">
+          <p class="hint">Certificate upload is not built yet, so add anything that
+             helps a human confirm your registration.</p>
+        </div>
+        <p class="login-error" id="licError" hidden></p>
+        <button type="submit" class="btn btn-primary" id="licBtn">${ICON.shield} Submit for review</button>
+      </form>
+    </div>`);
+    slot.appendChild(form);
+
+    const errBox = $("#licError", form);
+    const btn = $("#licBtn", form);
+    $("#licForm", form).onsubmit = async (e) => {
+      e.preventDefault();
+      errBox.hidden = true;
+      btn.disabled = true; btn.textContent = "Submitting…";
+      try {
+        await API.submitLicense({
+          license_number: $("#v-num", form).value.trim(),
+          license_board: $("#v-board", form).value.trim(),
+          license_country: $("#v-country", form).value.trim(),
+          credential: $("#v-cred", form).value.trim(),
+          document_note: $("#v-note", form).value.trim(),
+        });
+        await refresh();
+        renderAuthSlot();
+        toast("Submitted — an administrator will review it");
+        render();
+      } catch (err) {
+        errBox.textContent = err.message;
+        errBox.hidden = false;
+        btn.disabled = false;
+        btn.innerHTML = `${ICON.shield} Submit for review`;
+      }
+    };
+  })();
+
   return view;
 }
 
@@ -862,6 +971,8 @@ function renderLogin() {
       </form>
 
       <div class="login-hint">
+        <p style="margin-bottom:12px">No account?
+           <a href="#/signup" style="color:var(--accent);font-weight:600">Create one</a></p>
         <p><b>Local test accounts</b> — full credentials are in <code>ACCOUNTS.txt</code></p>
         <div class="login-accounts">
           <button class="acct-chip" data-e="admin@dentalinfo.test"  data-p="Admin@12345">Admin</button>
@@ -913,6 +1024,196 @@ function renderLogin() {
   return view;
 }
 
+/* ── Signup view ─────────────────────────────────────────── */
+function renderSignup() {
+  const view = el(`<div class="login-wrap">
+    <div class="login-card" style="max-width:452px">
+      <div class="login-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3c-2.2 0-3.2 1-5 1S4 3.4 4 6.5c0 3 1 4.6 1.7 7.2.6 2.2.8 6.3 2.6 6.3 1.6 0 1.3-4.5 3.7-4.5s2.1 4.5 3.7 4.5c1.8 0 2-4.1 2.6-6.3C19 11.1 20 9.5 20 6.5 20 3.4 18.8 4 17 4s-2.8-1-5-1z"/>
+        </svg>
+      </div>
+      <h1>Create an account</h1>
+      <p class="login-sub">Anyone can read Dental Info. Publishing requires a
+         verified dental license, which you can submit after signing up.</p>
+
+      <form id="signupForm" novalidate>
+        <div class="field">
+          <label for="s-name">Full name</label>
+          <input id="s-name" type="text" autocomplete="name" placeholder="Dr. Priya Nair">
+        </div>
+        <div class="field">
+          <label for="s-email">Email</label>
+          <input id="s-email" type="text" autocomplete="username" placeholder="you@clinic.com">
+        </div>
+        <div class="field">
+          <label for="s-pw">Password</label>
+          <input id="s-pw" type="password" autocomplete="new-password" placeholder="At least 10 characters">
+          <p class="hint">At least 10 characters, and not your name or email.</p>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="s-cred">Credential <span class="opt">optional</span></label>
+            <input id="s-cred" type="text" placeholder="MDS Endodontics">
+          </div>
+          <div class="field">
+            <label for="s-loc">Location <span class="opt">optional</span></label>
+            <input id="s-loc" type="text" placeholder="Bengaluru, IN">
+          </div>
+        </div>
+        <p class="login-error" id="signupError" hidden></p>
+        <button type="submit" class="btn btn-primary btn-block" id="signupBtn">Create account</button>
+      </form>
+
+      <div class="login-hint">
+        <p>Already have an account? <a href="#/login" style="color:var(--accent);font-weight:600">Sign in</a></p>
+      </div>
+    </div>
+  </div>`);
+
+  const errBox = $("#signupError", view);
+  const btn = $("#signupBtn", view);
+
+  $("#signupForm", view).onsubmit = async (e) => {
+    e.preventDefault();
+    errBox.hidden = true;
+    btn.disabled = true; btn.textContent = "Creating…";
+    try {
+      await API.signup({
+        name: $("#s-name", view).value.trim(),
+        email: $("#s-email", view).value.trim(),
+        password: $("#s-pw", view).value,
+        credential: $("#s-cred", view).value.trim(),
+        location: $("#s-loc", view).value.trim(),
+      });
+      await refresh();
+      renderAuthSlot();
+      toast(`Welcome, ${SESSION.name}`);
+      location.hash = "#/verify";   // straight to the next real step
+      render();
+    } catch (err) {
+      errBox.textContent = err.message;
+      errBox.hidden = false;
+      btn.disabled = false; btn.textContent = "Create account";
+    }
+  };
+  return view;
+}
+
+/* ── Admin: verification review queue ────────────────────── */
+function renderAdmin() {
+  if (!signedIn()) {
+    return el(`<div class="gate">
+      <div class="gate-icon">${ICON.lock}</div>
+      <h2>Sign in required</h2>
+      <div class="gate-actions"><a class="btn btn-primary" href="#/login">Sign in</a></div>
+    </div>`);
+  }
+  if (!isAdmin()) {
+    return el(`<div class="gate">
+      <div class="gate-icon">${ICON.lock}</div>
+      <h2>Admins only</h2>
+      <p>The verification queue is restricted to administrators.</p>
+      <div class="gate-actions"><a class="btn btn-ghost" href="#/browse">Back to browse</a></div>
+    </div>`);
+  }
+
+  const view = el(`<div class="verify-wrap">
+    <section class="hero compact" style="margin-bottom:24px">
+      <div class="hero-inner">
+        <h1>Verification queue</h1>
+        <p>Every approval grants posting rights. Check the license number against
+           the issuing board before approving — the automatic registry check is
+           not yet integrated.</p>
+      </div>
+    </section>
+    <div id="queueBody"><div class="empty"><h3>Loading…</h3></div></div>
+  </div>`);
+
+  const body = $("#queueBody", view);
+
+  const load = async () => {
+    body.innerHTML = `<div class="empty"><h3>Loading…</h3></div>`;
+    let requests;
+    try {
+      ({ requests } = await API.vQueue());
+    } catch (err) {
+      body.innerHTML = "";
+      body.appendChild(el(`<div class="empty"><h3>Could not load the queue</h3>
+        <p>${esc(err.message)}</p></div>`));
+      return;
+    }
+    body.innerHTML = "";
+    if (!requests.length) {
+      body.appendChild(el(`<div class="empty"><h3>Nothing waiting</h3>
+        <p>New license submissions will appear here.</p></div>`));
+      return;
+    }
+    requests.forEach((r) => body.appendChild(queueCard(r, load)));
+  };
+
+  load();
+  return view;
+}
+
+function queueCard(r, reload) {
+  const card = el(`<div class="panel vreq">
+    <div class="vreq-head">
+      <div>
+        <div class="vreq-name">${esc(r.user_name)}</div>
+        <div class="vreq-sub">${esc(r.user_email)}${r.user_location ? " · " + esc(r.user_location) : ""}</div>
+      </div>
+      <span class="tag">${esc(r.user_role)}</span>
+    </div>
+    <div class="kv" style="margin:14px 0">
+      <div class="kv-row"><span class="k">License number</span><span class="v">${esc(r.license_number)}</span></div>
+      <div class="kv-row"><span class="k">Issuing board</span><span class="v">${esc(r.license_board)}</span></div>
+      <div class="kv-row"><span class="k">Country</span><span class="v">${esc(r.license_country)}</span></div>
+      ${r.credential ? `<div class="kv-row"><span class="k">Credential</span><span class="v">${esc(r.credential)}</span></div>` : ""}
+      ${r.document_note ? `<div class="kv-row"><span class="k">Applicant note</span><span class="v">${esc(r.document_note)}</span></div>` : ""}
+      <div class="kv-row"><span class="k">Submitted</span><span class="v">${fmtDate((r.created_at || "").slice(0,10))}</span></div>
+    </div>
+    <div class="vreq-registry">
+      <b>Registry check: ${esc(r.registry_check)}</b>
+      ${r.registry_detail ? `<span>${esc(r.registry_detail)}</span>` : ""}
+    </div>
+    <div class="field" style="margin:14px 0 0">
+      <label for="note-${esc(r.id)}">Decision note <span class="opt">required to reject</span></label>
+      <input id="note-${esc(r.id)}" type="text" placeholder="e.g. Confirmed against KSDC register, 11 Sep 2026">
+    </div>
+    <div class="vreq-actions">
+      <button class="btn btn-ghost btn-sm" data-act="reject">Reject</button>
+      <button class="btn btn-primary btn-sm" data-act="approve">${ICON.check} Approve &amp; grant posting rights</button>
+    </div>
+  </div>`);
+
+  const noteEl = $(`#note-${r.id}`, card);
+  card.querySelectorAll("[data-act]").forEach((b) => {
+    b.onclick = async () => {
+      const decision = b.dataset.act;
+      const note = noteEl.value.trim();
+      if (decision === "reject" && !note) {
+        toast("Give a reason the applicant can act on");
+        noteEl.focus();
+        return;
+      }
+      if (decision === "approve" &&
+          !confirm(`Approve ${r.user_name}?\n\nThis grants posting rights. Confirm the license number against ${r.license_board} first.`)) return;
+      card.querySelectorAll("button").forEach((x) => { x.disabled = true; });
+      try {
+        await API.decide(r.id, decision, note);
+        toast(decision === "approve" ? `${r.user_name} is now a verified contributor`
+                                     : `${r.user_name}'s request was rejected`);
+        reload();
+      } catch (err) {
+        toast(err.message);
+        card.querySelectorAll("button").forEach((x) => { x.disabled = false; });
+      }
+    };
+  });
+  return card;
+}
+
 /* ── Router ──────────────────────────────────────────────── */
 function render() {
   const hash = location.hash || "#/browse";
@@ -923,6 +1224,8 @@ function render() {
   let node, navKey;
   try {
     if (hash.startsWith("#/login"))           { node = renderLogin();            navKey = null; }
+    else if (hash.startsWith("#/signup"))     { node = renderSignup();           navKey = null; }
+    else if (hash.startsWith("#/admin"))      { node = renderAdmin();            navKey = "#/admin"; }
     else if (hash.startsWith("#/case/"))      { node = renderCase(hash.slice(7)); navKey = "#/browse"; }
     else if (hash.startsWith("#/contribute")) { node = renderContribute();        navKey = "#/contribute"; }
     else if (hash.startsWith("#/verify"))     { node = renderVerify();            navKey = "#/verify"; }
@@ -990,6 +1293,16 @@ document.addEventListener("keydown", (e) => {
 function renderAuthSlot() {
   const slot = $("#authSlot");
   slot.innerHTML = "";
+
+  /* the admin queue link only exists for admins */
+  const nav = document.querySelector(".topnav");
+  let adminLink = nav.querySelector('[href="#/admin"]');
+  if (isAdmin() && !adminLink) {
+    adminLink = el('<a class="topnav-link" href="#/admin">Queue</a>');
+    nav.appendChild(adminLink);
+  } else if (!isAdmin() && adminLink) {
+    adminLink.remove();
+  }
 
   if (!signedIn()) {
     const btn = el(`<a class="btn btn-primary btn-sm" href="#/login">Sign in</a>`);

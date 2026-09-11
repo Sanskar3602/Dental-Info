@@ -115,3 +115,41 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
+
+-- ============================================================
+-- Contributor verification queue (CLAUDE.md core requirement 1)
+--
+-- A request is a row, not a flag on users, so that:
+--   · the history survives an approve/reject/re-apply cycle
+--   · annual re-verification creates a new row, keeping the old decision
+--   · an admin decision is attributable (reviewer_id + note)
+-- users.verification_status stays as the fast denormalised answer.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS verification_requests (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+  license_number  TEXT NOT NULL,
+  license_board   TEXT NOT NULL,
+  license_country TEXT NOT NULL,
+  credential      TEXT,
+
+  -- automatic registry cross-check; 'unavailable' when no integration
+  -- exists for that country yet, which is the normal case today
+  registry_check  TEXT NOT NULL DEFAULT 'not_run'
+                  CHECK (registry_check IN ('not_run','pass','fail','unavailable')),
+  registry_detail TEXT,
+
+  -- stands in for the document upload until blob storage exists
+  document_note   TEXT,
+
+  status          TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending','approved','rejected','withdrawn')),
+  reviewer_id     TEXT REFERENCES users(id) ON DELETE SET NULL,
+  reviewer_note   TEXT,
+
+  created_at      TEXT NOT NULL,
+  decided_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_vreq_user   ON verification_requests(user_id);
+CREATE INDEX IF NOT EXISTS idx_vreq_status ON verification_requests(status);

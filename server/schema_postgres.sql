@@ -104,3 +104,34 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
+
+-- ============================================================
+-- Contributor verification queue (CLAUDE.md core requirement 1)
+-- A request is a row, not a flag, so history survives approve/reject/
+-- re-apply and annual re-verification, and each decision is attributable.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS verification_requests (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+  license_number  TEXT NOT NULL,
+  license_board   TEXT NOT NULL,
+  license_country TEXT NOT NULL,
+  credential      TEXT,
+
+  registry_check  TEXT NOT NULL DEFAULT 'not_run'
+                  CHECK (registry_check IN ('not_run','pass','fail','unavailable')),
+  registry_detail TEXT,
+  document_note   TEXT,
+
+  status          TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending','approved','rejected','withdrawn')),
+  reviewer_id     TEXT REFERENCES users(id) ON DELETE SET NULL,
+  reviewer_note   TEXT,
+
+  created_at      TEXT NOT NULL,
+  decided_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_vreq_user    ON verification_requests(user_id);
+CREATE INDEX IF NOT EXISTS idx_vreq_status  ON verification_requests(status);
+CREATE INDEX IF NOT EXISTS idx_vreq_created ON verification_requests(created_at DESC);

@@ -128,6 +128,22 @@ class Handler(SimpleHTTPRequestHandler):
                     return self._error(HTTPStatus.NOT_FOUND, "Case not found")
                 return self._send_json({"post": post})
 
+            if path == "/api/verification":
+                user = self._require_user(conn)
+                if user is None:
+                    return
+                r = store.latest_request(conn, user["id"])
+                return self._send_json({"request": dict(r) if r else None})
+
+            if path == "/api/verification/queue":
+                user = self._require_user(conn)
+                if user is None:
+                    return
+                if not store.can(user, "user.manage"):
+                    return self._error(HTTPStatus.FORBIDDEN, "Admin only")
+                return self._send_json(
+                    {"requests": [dict(r) for r in store.queue(conn)]})
+
             if path == "/api/users":
                 user = self._require_user(conn)
                 if user is None:
@@ -177,6 +193,82 @@ class Handler(SimpleHTTPRequestHandler):
                     store.delete_session(conn, token)
                 cookie = f"{COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
                 return self._send_json({"ok": True}, cookie=cookie)
+
+            if path == "/api/signup":
+                problem = store.validate_signup(body)
+                if problem:
+                    return self._error(HTTPStatus.BAD_REQUEST, problem)
+                email = body["email"].strip().lower()
+                if store.get_user_by_email(conn, email):
+                    return self._error(HTTPStatus.CONFLICT,
+                                       "That email is already registered. Try signing in.")
+                uid = store.create_user(
+                    conn, email=email, name=body["name"], password=body["password"],
+                    role="reader",
+                    credential=(body.get("credential") or "").strip() or None,
+                    location=(body.get("location") or "").strip() or None)
+                store.audit(conn, actor_id=uid, action="user.signup", target=email)
+                token = store.create_session(conn, uid)
+                row = store.get_user(conn, uid)
+                cookie = (f"{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; "
+                          f"Max-Age={int(store.SESSION_TTL.total_seconds())}")
+                return self._send_json({"user": store.public_user(row)},
+                                       status=HTTPStatus.CREATED, cookie=cookie)
+
+            if path == "/api/verification":
+                user = self._require_user(conn)
+                if user is None:
+                    return
+                num = (body.get("license_number") or "").strip()
+                board = (body.get("license_board") or "").strip()
+                country = (body.get("license_country") or "").strip()
+                if len(num) < 3:
+                    return self._error(HTTPStatus.BAD_REQUEST, "Enter your license number")
+                if len(board) < 3:
+                    return self._error(HTTPStatus.BAD_REQUEST,
+                                       "Enter the issuing board or council")
+                if len(country) < 2:
+                    return self._error(HTTPStatus.BAD_REQUEST,
+                                       "Enter the country of registration")
+                if store.pending_request(conn, user["id"]):
+                    return self._error(HTTPStatus.CONFLICT,
+                                       "You already have a verification request under review.")
+                rid = store.create_request(
+                    conn, user["id"], number=num, board=board, country=country,
+                    credential=(body.get("credential") or "").strip() or None,
+                    document_note=(body.get("document_note") or "").strip() or None)
+                store.audit(conn, actor_id=user["id"], action="verification.submit",
+                            target=rid, detail=board)
+                return self._send_json({"request": dict(store.get_request(conn, rid))},
+                                       status=HTTPStatus.CREATED)
+
+            if path.startswith("/api/verification/") and path.endswith("/decide"):
+                user = self._require_user(conn)
+                if user is None:
+                    return
+                if not store.can(user, "user.manage"):
+                    return self._error(HTTPStatus.FORBIDDEN, "Admin only")
+                rid = path.split("/")[3]
+                decision = (body.get("decision") or "").strip()
+                if decision not in ("approve", "reject"):
+                    return self._error(HTTPStatus.BAD_REQUEST,
+                                       "decision must be 'approve' or 'reject'")
+                note = (body.get("note") or "").strip() or None
+                if decision == "reject" and not note:
+                    return self._error(HTTPStatus.BAD_REQUEST,
+                                       "A rejection needs a reason the applicant can act on")
+                vreq = store.get_request(conn, rid)
+                if not vreq:
+                    return self._error(HTTPStatus.NOT_FOUND, "Request not found")
+                if vreq["status"] != "pending":
+                    return self._error(HTTPStatus.CONFLICT,
+                                       f"That request was already {vreq['status']}")
+                out = store.decide_request(conn, rid, reviewer_id=user["id"],
+                                           approve=(decision == "approve"), note=note)
+                store.audit(conn, actor_id=user["id"],
+                            action="verification." + decision, target=rid,
+                            detail=vreq["license_board"])
+                return self._send_json({"request": dict(out)})
 
             if path == "/api/posts":
                 user = self._require_user(conn)
