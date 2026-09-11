@@ -102,17 +102,24 @@ distinct from a read-only user everywhere in the data model and permissions.
 
 ## Security notes
 
-Appropriate for local development, **not** for exposure to the internet:
-
-- Passwords: PBKDF2-HMAC-SHA256, 240k iterations, per-user salt, constant-time
-  compare. Never stored or logged in plain text.
-- Sessions: 32-byte random tokens, `HttpOnly`, `SameSite=Lax`, 7-day expiry.
-- Login failures return one message for both unknown email and wrong password,
-  so the endpoint doesn't enumerate accounts.
+- **Passwords**: PBKDF2-HMAC-SHA256, 240k iterations, per-user salt,
+  constant-time compare. Never stored or logged in plain text.
+- **Sessions**: 32-byte random tokens, stored **SHA-256 hashed**. The raw value
+  exists only in the cookie, so a database read cannot be replayed as a live
+  session. `HttpOnly`, `SameSite=Lax`, `Secure` over HTTPS, 7-day expiry.
+- **CSRF**: state-changing requests need an `X-CSRF-Token` header matching a
+  readable `dental_info_csrf` cookie (double-submit). A cross-site page can make
+  the browser send cookies but cannot read them to forge the header. Plus an
+  `Origin` check that rejects cross-site POST/DELETE outright.
+- **Rate limiting**, counted in the database because serverless functions share
+  no memory: 8 failed sign-ins per email and 20 per IP per 15 minutes; 5 signups
+  per IP per hour. Exceeding returns 429.
+- **No account enumeration**: unknown email and wrong password return the same
+  message, and so does a rate-limited attempt.
 - Binds to `127.0.0.1` only.
 
-Before anyone else can reach this you need: HTTPS, rate limiting on `/api/login`,
-CSRF protection on state-changing routes, and `Secure` on the cookie.
+Still outstanding before real users: email verification of the address, password
+reset, and a review of how long sessions should live.
 
 ## Reset
 

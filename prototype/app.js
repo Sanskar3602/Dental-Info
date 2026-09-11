@@ -21,14 +21,30 @@ const NO_API_MESSAGE =
   "No backend at this address. This page is being served without its API — " +
   "run it locally with “python server/app.py” and open http://localhost:8000.";
 
+/* The CSRF cookie is readable on purpose: we echo it back in a header.
+   A cross-site page can make the browser SEND cookies but cannot READ
+   them, so it cannot produce the matching header. */
+function csrfToken() {
+  const m = document.cookie.match(/(?:^|;\s*)dental_info_csrf=([^;]*)/);
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
+const MUTATING = ["POST", "PUT", "PATCH", "DELETE"];
+
 const API = {
   async call(method, path, body) {
+    const headers = {};
+    if (body) headers["Content-Type"] = "application/json";
+    if (MUTATING.includes(method)) {
+      const t = csrfToken();
+      if (t) headers["X-CSRF-Token"] = t;
+    }
     let res;
     try {
       res = await fetch(path, {
         method,
         credentials: "same-origin",
-        headers: body ? { "Content-Type": "application/json" } : undefined,
+        headers,
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch (netErr) {

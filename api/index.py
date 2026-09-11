@@ -198,8 +198,99 @@ def user_for_token(cur, token):
     if not token:
         return None
     cur.execute("SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id "
-                "WHERE s.token = %s AND s.expires_at > %s", (token, now_iso()))
+                "WHERE s.token = %s AND s.expires_at > %s",
+                (hash_token(token), now_iso()))
     return cur.fetchone()
+
+
+CSRF_COOKIE = "dental_info_csrf"
+
+# Rate limits, counted in the database because serverless functions share
+# no memory. Generous enough not to lock out a real person fat-fingering a
+# password, tight enough that guessing is not viable.
+RATE_WINDOW_MIN = 15
+MAX_FAILS_PER_EMAIL = 8
+MAX_FAILS_PER_IP = 20
+MAX_SIGNUPS_PER_IP = 5
+
+
+def hash_token(raw):
+    """Sessions are stored hashed, so a database read cannot be replayed."""
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def client_ip(environ):
+    fwd = environ.get("HTTP_X_FORWARDED_FOR", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return environ.get("REMOTE_ADDR") or "unknown"
+
+
+def window_start(minutes=RATE_WINDOW_MIN):
+    return (datetime.now(timezone.utc) - timedelta(minutes=minutes)
+            ).replace(microsecond=0).isoformat()
+
+
+def record_attempt(cur, email, ip, ok):
+    cur.execute("INSERT INTO login_attempts (id,email,ip,ok,created_at) "
+                "VALUES (%s,%s,%s,%s,%s)",
+                (new_id(), (email or "").lower().strip() or None, ip,
+                 1 if ok else 0, now_iso()))
+
+
+def rate_limited(cur, email, ip):
+    """True when this email or IP has failed too often recently."""
+    since = window_start()
+    cur.execute("SELECT COUNT(*) AS n FROM login_attempts "
+                "WHERE email = %s AND ok = 0 AND created_at > %s",
+                ((email or "").lower().strip(), since))
+    if cur.fetchone()["n"] >= MAX_FAILS_PER_EMAIL:
+        return True
+    cur.execute("SELECT COUNT(*) AS n FROM login_attempts "
+                "WHERE ip = %s AND ok = 0 AND created_at > %s", (ip, since))
+    return cur.fetchone()["n"] >= MAX_FAILS_PER_IP
+
+
+def signup_limited(cur, ip):
+    cur.execute("SELECT COUNT(*) AS n FROM login_attempts "
+                "WHERE ip = %s AND email IS NOT NULL AND ok = 2 "
+                "AND created_at > %s", (ip, window_start(60)))
+    return cur.fetchone()["n"] >= MAX_SIGNUPS_PER_IP
+
+
+def origin_ok(environ):
+    """Reject cross-site state-changing requests.
+
+    Browsers always send Origin on cross-origin POST/DELETE, so a mismatch
+    is a genuine cross-site attempt. A missing Origin means a non-browser
+    client (curl, our own tests), which cookies alone cannot be tricked into.
+    """
+    origin = environ.get("HTTP_ORIGIN")
+    if not origin:
+        return True
+    host = environ.get("HTTP_HOST", "")
+    return origin.split("://")[-1].lower() == host.lower()
+
+
+def csrf_ok(environ, token):
+    """Double-submit: the header must match the non-HttpOnly cookie.
+
+    A cross-site page can make the browser send cookies, but cannot read
+    them to set the matching header.
+    """
+    if not token:
+        return True                      # anonymous request, nothing to protect
+    sent = environ.get("HTTP_X_CSRF_TOKEN", "")
+    raw = environ.get("HTTP_COOKIE") or ""
+    jar = SimpleCookie()
+    try:
+        jar.load(raw)
+    except Exception:
+        return False
+    m = jar.get(CSRF_COOKIE)
+    if not (sent and m and m.value):
+        return False
+    return secrets.compare_digest(sent, m.value)
 
 
 def create_session(cur, user_id):
@@ -207,7 +298,7 @@ def create_session(cur, user_id):
     created = datetime.now(timezone.utc).replace(microsecond=0)
     cur.execute("INSERT INTO sessions (token,user_id,created_at,expires_at) "
                 "VALUES (%s,%s,%s,%s)",
-                (token, user_id, created.isoformat(),
+                (hash_token(token), user_id, created.isoformat(),
                  (created + SESSION_TTL).isoformat()))
     return token
 
@@ -293,7 +384,8 @@ def _json(start_response, payload, code=200, cookie=None):
                ("Content-Length", str(len(body))),
                ("Cache-Control", "no-store")]
     if cookie:
-        headers.append(("Set-Cookie", cookie))
+        for c in (cookie if isinstance(cookie, (list, tuple)) else [cookie]):
+            headers.append(("Set-Cookie", c))
     start_response(STATUS.get(code, "200 OK"), headers)
     return [body]
 
@@ -343,6 +435,18 @@ def _cookie(token, environ, clear=False):
     https = environ.get("HTTP_X_FORWARDED_PROTO", "http") == "https"
     parts = ["%s=%s" % (COOKIE_NAME, "" if clear else token),
              "Path=/", "HttpOnly", "SameSite=Lax"]
+    if https:
+        parts.append("Secure")
+    parts.append("Max-Age=0" if clear
+                 else "Max-Age=%d" % int(SESSION_TTL.total_seconds()))
+    return "; ".join(parts)
+
+
+def _csrf_cookie(value, environ, clear=False):
+    """Readable by JS on purpose -- the frontend echoes it back in a header."""
+    https = environ.get("HTTP_X_FORWARDED_PROTO", "http") == "https"
+    parts = ["%s=%s" % (CSRF_COOKIE, "" if clear else value),
+             "Path=/", "SameSite=Lax"]
     if https:
         parts.append("Secure")
     parts.append("Max-Age=0" if clear
@@ -417,7 +521,19 @@ def app(environ, start_response):
 
         try:
             with conn.cursor() as cur:
-                me = user_for_token(cur, _token(environ))
+                raw_token = _token(environ)
+                me = user_for_token(cur, raw_token)
+
+                # CSRF: only state-changing methods need protecting, and a
+                # GET must never mutate anything.
+                if method in ("POST", "PUT", "PATCH", "DELETE"):
+                    if not origin_ok(environ):
+                        return _err(start_response, 403,
+                                    "Cross-site request blocked")
+                    if me is not None and not csrf_ok(environ, raw_token):
+                        return _err(start_response, 403,
+                                    "Missing or invalid CSRF token. Reload the page "
+                                    "and try again.")
 
                 if path == "/api/me":
                     return _json(start_response, {"user": public_user(me)})
@@ -428,20 +544,32 @@ def app(environ, start_response):
                     body = _body(environ)
                     if body is None:
                         return _err(start_response, 400, "Body must be valid JSON")
-                    row = get_user_by_email(cur, body.get("email"))
+                    ip = client_ip(environ)
+                    attempted = body.get("email") or ""
+                    if rate_limited(cur, attempted, ip):
+                        # deliberately says nothing about whether the account exists
+                        return _err(start_response, 429,
+                                    "Too many failed sign-in attempts. Wait %d minutes "
+                                    "and try again." % RATE_WINDOW_MIN)
+                    row = get_user_by_email(cur, attempted)
                     if row is None or not verify_password(body.get("password") or "", row):
+                        record_attempt(cur, attempted, ip, ok=False)
                         return _err(start_response, 401, "Incorrect email or password")
+                    record_attempt(cur, attempted, ip, ok=True)
                     token = create_session(cur, row["id"])
+                    csrf = secrets.token_urlsafe(24)
                     audit(cur, row["id"], "login", row["email"])
                     return _json(start_response, {"user": public_user(row)},
-                                 cookie=_cookie(token, environ))
+                                 cookie=[_cookie(token, environ),
+                                         _csrf_cookie(csrf, environ)])
 
                 if path == "/api/logout":
-                    tok = _token(environ)
-                    if tok:
-                        cur.execute("DELETE FROM sessions WHERE token = %s", (tok,))
+                    if raw_token:
+                        cur.execute("DELETE FROM sessions WHERE token = %s",
+                                    (hash_token(raw_token),))
                     return _json(start_response, {"ok": True},
-                                 cookie=_cookie(None, environ, clear=True))
+                                 cookie=[_cookie(None, environ, clear=True),
+                                         _csrf_cookie(None, environ, clear=True)])
 
                 # -- signup ------------------------------------------------
                 if path == "/api/signup":
@@ -457,16 +585,27 @@ def app(environ, start_response):
                     if get_user_by_email(cur, email):
                         return _err(start_response, 409,
                                     "That email is already registered. Try signing in.")
+                    ip = client_ip(environ)
+                    if signup_limited(cur, ip):
+                        return _err(start_response, 429,
+                                    "Too many accounts created from this network. "
+                                    "Try again later.")
                     uid = create_user(cur, email, body["name"], body["password"],
                                       role="reader",
                                       credential=(body.get("credential") or "").strip() or None,
                                       location=(body.get("location") or "").strip() or None)
                     audit(cur, uid, "user.signup", email)
+                    # ok=2 marks a signup, distinct from a login attempt
+                    cur.execute("INSERT INTO login_attempts (id,email,ip,ok,created_at) "
+                                "VALUES (%s,%s,%s,2,%s)",
+                                (new_id(), email, ip, now_iso()))
                     cur.execute("SELECT * FROM users WHERE id = %s", (uid,))
                     row = cur.fetchone()
                     token = create_session(cur, uid)   # sign them straight in
-                    return _json(start_response, {"user": public_user(row)},
-                                 201, cookie=_cookie(token, environ))
+                    csrf = secrets.token_urlsafe(24)
+                    return _json(start_response, {"user": public_user(row)}, 201,
+                                 cookie=[_cookie(token, environ),
+                                         _csrf_cookie(csrf, environ)])
 
                 # -- verification: submit / read own status -----------------
                 if path == "/api/verification":

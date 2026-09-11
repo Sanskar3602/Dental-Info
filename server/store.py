@@ -177,12 +177,61 @@ def can(user_row, action: str) -> bool:
 
 
 # ── sessions ───────────────────────────────────────────────────────────────
+RATE_WINDOW_MIN = 15
+MAX_FAILS_PER_EMAIL = 8
+MAX_FAILS_PER_IP = 20
+MAX_SIGNUPS_PER_IP = 5
+
+
+def hash_token(raw: str) -> str:
+    """Sessions are stored hashed, so a DB read cannot be replayed."""
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _window(minutes=RATE_WINDOW_MIN) -> str:
+    return (datetime.now(timezone.utc) - timedelta(minutes=minutes)
+            ).replace(microsecond=0).isoformat()
+
+
+def record_attempt(conn, email, ip, ok) -> None:
+    conn.execute("INSERT INTO login_attempts (id,email,ip,ok,created_at) "
+                 "VALUES (?,?,?,?,?)",
+                 (new_id(), (email or "").lower().strip() or None, ip,
+                  1 if ok else 0, now_iso()))
+
+
+def rate_limited(conn, email, ip) -> bool:
+    since = _window()
+    n = conn.execute("SELECT COUNT(*) c FROM login_attempts "
+                     "WHERE email = ? AND ok = 0 AND created_at > ?",
+                     ((email or "").lower().strip(), since)).fetchone()["c"]
+    if n >= MAX_FAILS_PER_EMAIL:
+        return True
+    n = conn.execute("SELECT COUNT(*) c FROM login_attempts "
+                     "WHERE ip = ? AND ok = 0 AND created_at > ?",
+                     (ip, since)).fetchone()["c"]
+    return n >= MAX_FAILS_PER_IP
+
+
+def signup_limited(conn, ip) -> bool:
+    n = conn.execute("SELECT COUNT(*) c FROM login_attempts "
+                     "WHERE ip = ? AND ok = 2 AND created_at > ?",
+                     (ip, _window(60))).fetchone()["c"]
+    return n >= MAX_SIGNUPS_PER_IP
+
+
+def record_signup(conn, email, ip) -> None:
+    conn.execute("INSERT INTO login_attempts (id,email,ip,ok,created_at) "
+                 "VALUES (?,?,?,2,?)", (new_id(), email, ip, now_iso()))
+
+
 def create_session(conn, user_id: str) -> str:
     token = secrets.token_urlsafe(32)
     created = datetime.now(timezone.utc).replace(microsecond=0)
     conn.execute(
         "INSERT INTO sessions (token,user_id,created_at,expires_at) VALUES (?,?,?,?)",
-        (token, user_id, created.isoformat(), (created + SESSION_TTL).isoformat()),
+        (hash_token(token), user_id, created.isoformat(),
+         (created + SESSION_TTL).isoformat()),
     )
     return token
 
@@ -193,13 +242,13 @@ def user_for_token(conn, token: str):
     row = conn.execute(
         "SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id "
         "WHERE s.token = ? AND s.expires_at > ?",
-        (token, now_iso()),
+        (hash_token(token), now_iso()),
     ).fetchone()
     return row
 
 
 def delete_session(conn, token: str) -> None:
-    conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+    conn.execute("DELETE FROM sessions WHERE token = ?", (hash_token(token),))
 
 
 def purge_expired_sessions(conn) -> int:

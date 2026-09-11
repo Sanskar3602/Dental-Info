@@ -131,16 +131,18 @@ migration, so local and deployed credentials can't drift.
 
 Fine for testing; **not** hardened for real users:
 
-- **No rate limiting on `/api/login`.** Add it before the URL is shared widely.
-- **No CSRF protection** on state-changing routes. The cookie is `SameSite=Lax`,
-  which blocks the common cross-site cases but is not a substitute.
+- ~~No rate limiting~~ — done: 8 failed sign-ins per email / 20 per IP per
+  15 min, 5 signups per IP per hour, counted in the database.
+- ~~No CSRF protection~~ — done: `Origin` check plus an `X-CSRF-Token`
+  double-submit on every state-changing route.
 - **Permissions are enforced**: admin deletes any case, a contributor deletes
   only their own, a read-only account deletes nothing. `DENTAL_INFO_PERMISSIVE=1`
   bypasses this for debugging — do not set it in production.
 - **Change the seeded passwords.** They're in a gitignored file, but they're
   known-weak and documented in this repo's history.
-- Session tokens are stored unhashed; a database read would expose live
-  sessions. Hash them like passwords before production.
+- ~~Session tokens stored unhashed~~ — done: stored SHA-256 hashed, so a
+  database read cannot be replayed.
+- **Still missing**: email-address verification, password reset.
 
 ## Reset the deployed data
 

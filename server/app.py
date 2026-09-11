@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import sys
 from http import HTTPStatus
 from http.cookies import SimpleCookie
@@ -29,6 +30,7 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR.parent / "prototype"
 PORT = int(os.environ.get("PORT", "8000"))
 COOKIE_NAME = "dental_info_session"
+CSRF_COOKIE = "dental_info_csrf"
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -48,9 +50,19 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         if cookie:
-            self.send_header("Set-Cookie", cookie)
+            for c in (cookie if isinstance(cookie, (list, tuple)) else [cookie]):
+                self.send_header("Set-Cookie", c)
         self.end_headers()
         self.wfile.write(body)
+
+    def _session_cookies(self, token):
+        """Session cookie (HttpOnly) plus a readable CSRF token the frontend
+        echoes back in a header."""
+        age = int(store.SESSION_TTL.total_seconds())
+        return [
+            f"{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={age}",
+            f"{CSRF_COOKIE}={secrets.token_urlsafe(24)}; Path=/; SameSite=Lax; Max-Age={age}",
+        ]
 
     def _error(self, status, message):
         self._send_json({"error": message}, status=status)
@@ -73,6 +85,49 @@ class Handler(SimpleHTTPRequestHandler):
         jar.load(raw)
         morsel = jar.get(COOKIE_NAME)
         return morsel.value if morsel else None
+
+    def _client_ip(self):
+        fwd = self.headers.get("X-Forwarded-For")
+        if fwd:
+            return fwd.split(",")[0].strip()
+        return self.client_address[0] if self.client_address else "unknown"
+
+    def _csrf_cookie_value(self):
+        raw = self.headers.get("Cookie")
+        if not raw:
+            return None
+        jar = SimpleCookie()
+        try:
+            jar.load(raw)
+        except Exception:
+            return None
+        m = jar.get(CSRF_COOKIE)
+        return m.value if m else None
+
+    def _origin_ok(self):
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True          # non-browser client; cookies cannot be tricked
+        return origin.split("://")[-1].lower() == (self.headers.get("Host") or "").lower()
+
+    def _csrf_ok(self):
+        """Double-submit: header must match the readable cookie."""
+        if self._token() is None:
+            return True          # anonymous, nothing to protect
+        sent = self.headers.get("X-CSRF-Token") or ""
+        have = self._csrf_cookie_value() or ""
+        return bool(sent) and bool(have) and secrets.compare_digest(sent, have)
+
+    def _guard_mutation(self):
+        """Returns True when the request may proceed."""
+        if not self._origin_ok():
+            self._error(HTTPStatus.FORBIDDEN, "Cross-site request blocked")
+            return False
+        if not self._csrf_ok():
+            self._error(HTTPStatus.FORBIDDEN,
+                        "Missing or invalid CSRF token. Reload the page and try again.")
+            return False
+        return True
 
     def _current_user(self, conn):
         return store.user_for_token(conn, self._token())
@@ -99,12 +154,16 @@ class Handler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         if not path.startswith("/api/"):
             return self._error(HTTPStatus.NOT_FOUND, "Not found")
+        if not self._guard_mutation():
+            return
         return self._api_post(path)
 
     def do_DELETE(self):
         path = urlparse(self.path).path
         if not path.startswith("/api/"):
             return self._error(HTTPStatus.NOT_FOUND, "Not found")
+        if not self._guard_mutation():
+            return
         return self._api_delete(path)
 
     # ── GET /api/... ──────────────────────────────────────────────────────
@@ -176,25 +235,37 @@ class Handler(SimpleHTTPRequestHandler):
             if path == "/api/login":
                 email = (body.get("email") or "").strip()
                 password = body.get("password") or ""
+                ip = self._client_ip()
+                if store.rate_limited(conn, email, ip):
+                    return self._error(
+                        HTTPStatus.TOO_MANY_REQUESTS,
+                        f"Too many failed sign-in attempts. Wait "
+                        f"{store.RATE_WINDOW_MIN} minutes and try again.")
                 row = store.get_user_by_email(conn, email)
                 # same message either way: do not reveal which accounts exist
                 if row is None or not store.verify_password(password, row):
+                    store.record_attempt(conn, email, ip, ok=False)
                     return self._error(HTTPStatus.UNAUTHORIZED,
                                        "Incorrect email or password")
+                store.record_attempt(conn, email, ip, ok=True)
                 token = store.create_session(conn, row["id"])
                 store.audit(conn, actor_id=row["id"], action="login", target=row["email"])
-                cookie = (f"{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; "
-                          f"Max-Age={int(store.SESSION_TTL.total_seconds())}")
-                return self._send_json({"user": store.public_user(row)}, cookie=cookie)
+                return self._send_json({"user": store.public_user(row)},
+                                       cookie=self._session_cookies(token))
 
             if path == "/api/logout":
                 token = self._token()
                 if token:
                     store.delete_session(conn, token)
-                cookie = f"{COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
-                return self._send_json({"ok": True}, cookie=cookie)
+                return self._send_json({"ok": True}, cookie=[
+                    f"{COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+                    f"{CSRF_COOKIE}=; Path=/; SameSite=Lax; Max-Age=0"])
 
             if path == "/api/signup":
+                if store.signup_limited(conn, self._client_ip()):
+                    return self._error(HTTPStatus.TOO_MANY_REQUESTS,
+                                       "Too many accounts created from this network. "
+                                       "Try again later.")
                 problem = store.validate_signup(body)
                 if problem:
                     return self._error(HTTPStatus.BAD_REQUEST, problem)
@@ -208,12 +279,12 @@ class Handler(SimpleHTTPRequestHandler):
                     credential=(body.get("credential") or "").strip() or None,
                     location=(body.get("location") or "").strip() or None)
                 store.audit(conn, actor_id=uid, action="user.signup", target=email)
+                store.record_signup(conn, email, self._client_ip())
                 token = store.create_session(conn, uid)
                 row = store.get_user(conn, uid)
-                cookie = (f"{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; "
-                          f"Max-Age={int(store.SESSION_TTL.total_seconds())}")
                 return self._send_json({"user": store.public_user(row)},
-                                       status=HTTPStatus.CREATED, cookie=cookie)
+                                       status=HTTPStatus.CREATED,
+                                       cookie=self._session_cookies(token))
 
             if path == "/api/verification":
                 user = self._require_user(conn)

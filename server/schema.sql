@@ -153,3 +153,24 @@ CREATE TABLE IF NOT EXISTS verification_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_vreq_user   ON verification_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_vreq_status ON verification_requests(status);
+
+-- ============================================================
+-- Security hardening
+--
+-- sessions.token holds a SHA-256 HASH of the session token, never the
+-- token itself. The raw value lives only in the user's cookie, so a
+-- database read cannot be replayed as a live session. (Column name kept
+-- for compatibility; the contents changed.)
+--
+-- login_attempts backs rate limiting. Serverless functions share no
+-- memory, so the counter has to live in the database.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS login_attempts (
+  id         TEXT PRIMARY KEY,
+  email      TEXT,              -- what was attempted, may not exist
+  ip         TEXT,
+  ok         INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_attempts_email ON login_attempts(email, created_at);
+CREATE INDEX IF NOT EXISTS idx_attempts_ip    ON login_attempts(ip, created_at);
