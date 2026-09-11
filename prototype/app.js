@@ -86,6 +86,7 @@ const API = {
   logout:    ()          => API.call("POST", "/api/logout"),
   posts:     ()          => API.call("GET", "/api/posts"),
   createPost:(data)      => API.call("POST", "/api/posts", data),
+  updatePost:(id, data)  => API.call("PUT", "/api/posts/" + encodeURIComponent(id), data),
   deletePost:(id)        => API.call("DELETE", "/api/posts/" + encodeURIComponent(id)),
 
   signup:    (data)      => API.call("POST", "/api/signup", data),
@@ -156,6 +157,9 @@ const isMine    = (c) => !!(SESSION && c && c.author && c.author.id === SESSION.
    refused, but the button should never have been there. */
 const canDelete = (c) => !!(SESSION && (
   SESSION.can_delete_any || (SESSION.can_delete_own && isMine(c))
+));
+const canEdit   = (c) => !!(SESSION && (
+  SESSION.can_edit_any || (SESSION.can_edit_own && isMine(c))
 ));
 
 /* Difficulty as an ordinal 3-step meter. The text label is always
@@ -467,6 +471,10 @@ function renderCase(id) {
       <aside class="sidecar">
         <div class="panel">
           <button class="btn btn-primary btn-block" id="saveCase">${ICON.bookmk} Save to library</button>
+          ${canEdit(c) ? `<a class="btn btn-ghost btn-block" style="margin-top:9px"
+             href="#/edit/${esc(c.id)}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+            Edit case</a>` : ""}
           ${canDelete(c) ? `
           <button class="btn btn-danger btn-block" id="deleteCase" style="margin-top:9px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></svg>
@@ -526,7 +534,19 @@ function renderCase(id) {
 }
 
 /* ── Contribute view (role-gated) ────────────────────────── */
-function renderContribute() {
+function renderContribute(editing) {
+  if (editing && !canEdit(editing)) {
+    return el(`<div class="gate">
+      <div class="gate-icon">${ICON.lock}</div>
+      <h2>You cannot edit this case</h2>
+      <p>${signedIn() ? "Cases can only be edited by their author, or by an admin."
+                      : "Sign in to edit your own cases."}</p>
+      <div class="gate-actions">
+        <a class="btn btn-primary" href="#/case/${esc(editing.id)}">Back to the case</a>
+      </div>
+    </div>`);
+  }
+
   if (!signedIn()) {
     return el(`<div class="gate">
       <div class="gate-icon">${ICON.lock}</div>
@@ -557,20 +577,21 @@ function renderContribute() {
   const view = el(`<div class="form-wrap">
     <section class="hero compact" style="margin-bottom:24px">
       <div class="hero-inner">
-        <h1>Document a case</h1>
-        <p>Structured entry is what makes cases searchable later. Aim for what you would
-           want to read at 8am before a difficult appointment.</p>
+        <h1>${editing ? "Edit case" : "Document a case"}</h1>
+        <p>${editing
+          ? "Corrections are expected — a clinical write-up you cannot fix is worse than none."
+          : "Structured entry is what makes cases searchable later. Aim for what you would want to read at 8am before a difficult appointment."}</p>
       </div>
     </section>
     <div class="form-steps">
       <div class="form-step on">1 · Classification</div>
       <div class="form-step on">2 · Clinical narrative</div>
-      <div class="form-step">3 · Media &amp; review</div>
+      <div class="form-step${editing ? " on" : ""}">3 · Media &amp; review</div>
     </div>
     <form class="form-card" id="caseForm">
       <div class="field">
         <label for="f-title">Case title</label>
-        <input id="f-title" type="text" placeholder="e.g. Separated rotary file in the apical third of a curved MB canal" required>
+        <input id="f-title" type="text" placeholder="e.g. Separated rotary file in the apical third of a curved MB canal" required value="${editing ? esc(editing.title) : ""}">
         <p class="hint">Describe the complication, not the treatment. Specific beats catchy.</p>
       </div>
       <div class="field-row">
@@ -579,7 +600,7 @@ function renderContribute() {
           <select id="f-proc" required>
             <option value="">Select a procedure…</option>
             ${PROCEDURES.map((g) => `<optgroup label="${esc(g.label)}">
-              ${g.children.map((c) => `<option value="${c.id}">${esc(c.label)}</option>`).join("")}</optgroup>`).join("")}
+              ${g.children.map((c) => `<option value="${c.id}"${editing && editing.procedure === c.id ? " selected" : ""}>${esc(c.label)}</option>`).join("")}</optgroup>`).join("")}
             <option value="__other">Other — not listed</option>
           </select>
           <div class="field other-field" id="f-proc-other-wrap" hidden>
@@ -592,7 +613,7 @@ function renderContribute() {
           <label for="f-comp">Primary complication</label>
           <select id="f-comp" required>
             <option value="">Select a complication…</option>
-            ${COMPLICATIONS.map((c) => `<option>${esc(c)}</option>`).join("")}
+            ${COMPLICATIONS.map((c) => `<option${editing && (editing.complications || []).includes(c) ? " selected" : ""}>${esc(c)}</option>`).join("")}
             <option value="__other">Other — not listed</option>
           </select>
           <div class="field other-field" id="f-comp-other-wrap" hidden>
@@ -605,30 +626,30 @@ function renderContribute() {
       <div class="field">
         <label for="f-diff">Difficulty</label>
         <select id="f-diff">
-          <option>Low</option><option selected>Medium</option><option>High</option>
+          ${["Low","Medium","High"].map((d) => `<option${(editing ? editing.difficulty === d : d === "Medium") ? " selected" : ""}>${d}</option>`).join("")}
         </select>
         <p class="hint">How much judgement or specialist kit this needed beyond routine practice.</p>
       </div>
       <div class="field">
         <label for="f-tools">Tools &amp; materials used</label>
-        <input id="f-tools" type="text" placeholder="Comma separated — e.g. ProTaper Gold F2, ultrasonic tip, 17% EDTA">
+        <input id="f-tools" type="text" placeholder="Comma separated — e.g. ProTaper Gold F2, ultrasonic tip, 17% EDTA" value="${editing ? esc((editing.tools || []).join(", ")) : ""}">
         <p class="hint">Brand and size where it mattered to the outcome.</p>
       </div>
       <div class="field">
         <label for="f-pres">Presentation</label>
-        <textarea id="f-pres" placeholder="Age, sex, tooth, history, findings. No identifying details."></textarea>
+        <textarea id="f-pres" placeholder="Age, sex, tooth, history, findings. No identifying details.">${editing ? esc(editing.presentation || "") : ""}</textarea>
       </div>
       <div class="field">
         <label for="f-unusual">What was unusual or difficult</label>
-        <textarea id="f-unusual" placeholder="The specific thing that made this case not routine."></textarea>
+        <textarea id="f-unusual" placeholder="The specific thing that made this case not routine.">${editing ? esc(editing.unusual || "") : ""}</textarea>
       </div>
       <div class="field">
         <label for="f-res">How you resolved it</label>
-        <textarea id="f-res" style="min-height:132px" placeholder="One step per line. Include what you tried that did not work."></textarea>
+        <textarea id="f-res" style="min-height:132px" placeholder="One step per line. Include what you tried that did not work.">${editing ? esc((editing.resolution || []).join("\n")) : ""}</textarea>
       </div>
       <div class="field">
         <label for="f-out">Outcome &amp; follow-up</label>
-        <textarea id="f-out" style="min-height:76px" placeholder="Review interval and what you found."></textarea>
+        <textarea id="f-out" style="min-height:76px" placeholder="Review interval and what you found.">${editing ? esc(editing.outcome || "") : ""}</textarea>
       </div>
       <div class="field">
         <label>Supporting media</label>
@@ -638,8 +659,10 @@ function renderContribute() {
         </div>
       </div>
       <div class="form-actions">
-        <button type="button" class="btn btn-ghost" id="saveDraft">Save draft</button>
-        <button type="submit" class="btn btn-primary" id="publishBtn">${ICON.check} Publish case</button>
+        ${editing
+          ? `<a class="btn btn-ghost" href="#/case/${esc(editing.id)}">Cancel</a>`
+          : `<button type="button" class="btn btn-ghost" id="saveDraft">Save draft</button>`}
+        <button type="submit" class="btn btn-primary" id="publishBtn">${ICON.check} ${editing ? "Save changes" : "Publish case"}</button>
       </div>
     </form>
   </div>`);
@@ -678,7 +701,8 @@ function renderContribute() {
 
   const submitBtn = $("#publishBtn", view);
 
-  $("#saveDraft", view).onclick = () => toast("Draft saving is not wired up yet");
+  const draftBtn = $("#saveDraft", view);
+  if (draftBtn) draftBtn.onclick = () => toast("Draft saving is not wired up yet");
 
   $("#caseForm", view).onsubmit = async (e) => {
     e.preventDefault();
@@ -717,17 +741,19 @@ function renderContribute() {
     };
 
     submitBtn.disabled = true;
-    submitBtn.textContent = "Publishing…";
+    submitBtn.textContent = editing ? "Saving…" : "Publishing…";
     try {
-      const { post } = await API.createPost(payload);
+      const { post } = editing
+        ? await API.updatePost(editing.id, payload)
+        : await API.createPost(payload);
       await refresh({ session: false });
-      toast(`Published — “${post.title.slice(0, 40)}”`);
+      toast(editing ? "Changes saved" : `Published — “${post.title.slice(0, 40)}”`);
       location.hash = "#/case/" + post.id;
       render();
     } catch (err) {
       toast(err.message);
       submitBtn.disabled = false;
-      submitBtn.innerHTML = `${ICON.check} Publish case`;
+      submitBtn.innerHTML = `${ICON.check} ${editing ? "Save changes" : "Publish case"}`;
     }
   };
   return view;
@@ -1244,6 +1270,14 @@ function render() {
     else if (hash.startsWith("#/admin"))      { node = renderAdmin();            navKey = "#/admin"; }
     else if (hash.startsWith("#/case/"))      { node = renderCase(hash.slice(7)); navKey = "#/browse"; }
     else if (hash.startsWith("#/contribute")) { node = renderContribute();        navKey = "#/contribute"; }
+    else if (hash.startsWith("#/edit/")) {
+      const target = CASES.find((x) => x.id === hash.slice(7));
+      node = target
+        ? renderContribute(target)
+        : el(`<div class="empty"><h3>Case not found</h3>
+            <p><a href="#/browse">Back to browse</a></p></div>`);
+      navKey = null;
+    }
     else if (hash.startsWith("#/verify"))     { node = renderVerify();            navKey = "#/verify"; }
     else                                      { node = renderBrowse();            navKey = "#/browse"; }
   } catch (err) {

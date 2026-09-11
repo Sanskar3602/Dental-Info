@@ -151,6 +151,8 @@ def public_user(row) -> dict:
         "can_post": can(row, "post.create"),
         "can_delete_any": can(row, "post.delete_any"),
         "can_delete_own": can(row, "post.delete_own"),
+        "can_edit_own": can(row, "post.edit_own"),
+        "can_edit_any": can(row, "post.edit_any"),
         "can_comment": can(row, "comment.create"),
         "is_admin": row["role"] == "admin",
         "permissive_mode": PERMISSIVE_MODE,
@@ -160,8 +162,10 @@ def public_user(row) -> dict:
 # ── authorisation ──────────────────────────────────────────────────────────
 ROLE_GRANTS = {
     "admin":       {"post.create", "post.delete_own", "post.delete_any",
-                    "post.edit_any", "comment.create", "user.manage", "audit.read"},
-    "contributor": {"post.create", "post.delete_own", "comment.create"},
+                    "post.edit_own", "post.edit_any",
+                    "comment.create", "user.manage", "audit.read"},
+    "contributor": {"post.create", "post.delete_own", "post.edit_own",
+                    "comment.create"},
     "reader":      set(),
 }
 
@@ -358,6 +362,34 @@ def create_post(conn, *, author_id: str, data: dict) -> str:
          data.get("created_at") or ts, ts),
     )
     return pid
+
+
+TEXT_COLS = {"title": "title", "summary": "summary", "procedure": "procedure",
+             "procedurePath": "procedure_path", "difficulty": "difficulty",
+             "presentation": "presentation", "unusual": "unusual",
+             "outcome": "outcome"}
+
+
+def update_post(conn, post_id: str, data: dict):
+    """Only touches keys present in `data`, so a partial edit cannot blank
+    fields the caller did not send."""
+    sets, vals = [], []
+    for key, col in TEXT_COLS.items():
+        if key in data:
+            v = data.get(key)
+            sets.append(f"{col} = ?")
+            vals.append(v.strip() if isinstance(v, str) else v)
+    for key in JSON_FIELDS:
+        if key in data:
+            sets.append(f"{key} = ?")
+            vals.append(json.dumps(data.get(key) or []))
+    if not sets:
+        return None
+    sets.append("updated_at = ?")
+    vals.append(now_iso())
+    vals.append(post_id)
+    conn.execute("UPDATE posts SET " + ", ".join(sets) + " WHERE id = ?", tuple(vals))
+    return get_post(conn, post_id)
 
 
 def delete_post(conn, post_id: str) -> bool:

@@ -52,9 +52,11 @@ PBKDF2_ITERATIONS = 240_000
 JSON_FIELDS = ("complications", "tools", "resolution", "takeaways", "media")
 
 ROLE_GRANTS = {
-    "admin": {"post.create", "post.delete_own", "post.delete_any", "post.edit_any",
+    "admin": {"post.create", "post.delete_own", "post.delete_any",
+              "post.edit_own", "post.edit_any",
               "comment.create", "user.manage", "audit.read"},
-    "contributor": {"post.create", "post.delete_own", "comment.create"},
+    "contributor": {"post.create", "post.delete_own", "post.edit_own",
+                    "comment.create"},
     "reader": set(),
 }
 
@@ -125,6 +127,8 @@ def public_user(row):
         "can_post": can(row, "post.create"),
         "can_delete_any": can(row, "post.delete_any"),
         "can_delete_own": can(row, "post.delete_own"),
+        "can_edit_own": can(row, "post.edit_own"),
+        "can_edit_any": can(row, "post.edit_any"),
         "can_comment": can(row, "comment.create"),
         "is_admin": row["role"] == "admin",
         "permissive_mode": PERMISSIVE_MODE,
@@ -795,6 +799,60 @@ def app(environ, start_response):
                         if not post:
                             return _err(start_response, 404, "Case not found")
                         return _json(start_response, {"post": post})
+                    if method in ("PUT", "PATCH"):
+                        if me is None:
+                            return _err(start_response, 401, "Not signed in")
+                        if not post:
+                            return _err(start_response, 404, "Case not found")
+                        own = post["author"]["id"] == me["id"]
+                        if not (can(me, "post.edit_any")
+                                or (own and can(me, "post.edit_own"))):
+                            return _err(start_response, 403,
+                                        "You can only edit your own cases"
+                                        if can(me, "post.edit_own")
+                                        else "Your account is read-only and cannot edit cases")
+                        body = _body(environ)
+                        if body is None:
+                            return _err(start_response, 400, "Body must be valid JSON")
+                        if "title" in body and not (body.get("title") or "").strip():
+                            return _err(start_response, 400, "A title is required")
+                        if "procedure" in body and not (body.get("procedure") or "").strip():
+                            return _err(start_response, 400, "A procedure type is required")
+                        if body.get("difficulty") not in (None, "Low", "Medium", "High"):
+                            return _err(start_response, 400, "Invalid difficulty")
+
+                        # Only touch what was sent, so a partial edit cannot
+                        # silently blank fields the form did not include.
+                        sets, vals = [], []
+                        text_cols = {"title": "title", "summary": "summary",
+                                     "procedure": "procedure",
+                                     "procedurePath": "procedure_path",
+                                     "difficulty": "difficulty",
+                                     "presentation": "presentation",
+                                     "unusual": "unusual", "outcome": "outcome"}
+                        for key, col in text_cols.items():
+                            if key in body:
+                                v = body.get(key)
+                                sets.append("%s = %%s" % col)
+                                vals.append(v.strip() if isinstance(v, str) else v)
+                        for key in JSON_FIELDS:
+                            if key in body:
+                                sets.append("%s = %%s" % key)
+                                vals.append(psycopg2.extras.Json(body.get(key) or []))
+                        if not sets:
+                            return _err(start_response, 400, "Nothing to update")
+                        sets.append("updated_at = %s")
+                        vals.append(now_iso())
+                        vals.append(post_id)
+                        cur.execute("UPDATE posts SET " + ", ".join(sets)
+                                    + " WHERE id = %s", tuple(vals))
+                        audit(cur, me["id"], "post.update", post_id,
+                              body.get("title") or post["title"])
+                        cur.execute(_POST_SELECT + " WHERE p.id = %s", (post_id,))
+                        out = _post_out(cur.fetchone())
+                        _attach_comments(cur, [out])
+                        return _json(start_response, {"post": out})
+
                     if method == "DELETE":
                         if me is None:
                             return _err(start_response, 401, "Not signed in")
@@ -811,7 +869,8 @@ def app(environ, start_response):
                         cur.execute("DELETE FROM posts WHERE id = %s", (post_id,))
                         audit(cur, me["id"], "post.delete", post_id, post["title"])
                         return _json(start_response, {"ok": True, "deleted": post_id})
-                    return _err(start_response, 405, "Use GET or DELETE")
+                    return _err(start_response, 405,
+                                "Use GET, PUT or DELETE")
 
                 if path == "/api/users":
                     if me is None:

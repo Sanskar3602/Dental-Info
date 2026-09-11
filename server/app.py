@@ -158,6 +158,17 @@ class Handler(SimpleHTTPRequestHandler):
             return
         return self._api_post(path)
 
+    def do_PUT(self):
+        path = urlparse(self.path).path
+        if not path.startswith("/api/"):
+            return self._error(HTTPStatus.NOT_FOUND, "Not found")
+        if not self._guard_mutation():
+            return
+        return self._api_put(path)
+
+    def do_PATCH(self):
+        return self.do_PUT()
+
     def do_DELETE(self):
         path = urlparse(self.path).path
         if not path.startswith("/api/"):
@@ -362,6 +373,44 @@ class Handler(SimpleHTTPRequestHandler):
                             target=pid, detail=title)
                 return self._send_json({"post": store.get_post(conn, pid)},
                                        status=HTTPStatus.CREATED)
+
+        return self._error(HTTPStatus.NOT_FOUND, "Unknown endpoint")
+
+    # ── PUT /api/... ──────────────────────────────────────────────────────
+    def _api_put(self, path):
+        body = self._read_json()
+        if body is None:
+            return self._error(HTTPStatus.BAD_REQUEST, "Body must be valid JSON")
+        with store.connect() as conn:
+            if path.startswith("/api/posts/"):
+                post_id = path.rsplit("/", 1)[-1]
+                user = self._require_user(conn)
+                if user is None:
+                    return
+                post = store.get_post(conn, post_id)
+                if not post:
+                    return self._error(HTTPStatus.NOT_FOUND, "Case not found")
+                own = post["author"]["id"] == user["id"]
+                if not (store.can(user, "post.edit_any")
+                        or (own and store.can(user, "post.edit_own"))):
+                    return self._error(
+                        HTTPStatus.FORBIDDEN,
+                        "You can only edit your own cases"
+                        if store.can(user, "post.edit_own")
+                        else "Your account is read-only and cannot edit cases")
+                if "title" in body and not (body.get("title") or "").strip():
+                    return self._error(HTTPStatus.BAD_REQUEST, "A title is required")
+                if "procedure" in body and not (body.get("procedure") or "").strip():
+                    return self._error(HTTPStatus.BAD_REQUEST,
+                                       "A procedure type is required")
+                if body.get("difficulty") not in (None, "Low", "Medium", "High"):
+                    return self._error(HTTPStatus.BAD_REQUEST, "Invalid difficulty")
+                out = store.update_post(conn, post_id, body)
+                if out is None:
+                    return self._error(HTTPStatus.BAD_REQUEST, "Nothing to update")
+                store.audit(conn, actor_id=user["id"], action="post.update",
+                            target=post_id, detail=out["title"])
+                return self._send_json({"post": out})
 
         return self._error(HTTPStatus.NOT_FOUND, "Unknown endpoint")
 
