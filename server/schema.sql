@@ -174,3 +174,28 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 );
 CREATE INDEX IF NOT EXISTS idx_attempts_email ON login_attempts(email, created_at);
 CREATE INDEX IF NOT EXISTS idx_attempts_ip    ON login_attempts(ip, created_at);
+
+-- ============================================================
+-- Media uploads
+--
+-- Bytes are stored in Postgres (base64 TEXT), which is what the user's
+-- Neon plan budget (0.5GB) is being sized against -- see MEDIA.md for
+-- the reasoning. Uploads are CHUNKED because Vercel serverless functions
+-- cap a single request body well under 50MB; the client sends a file as
+-- a sequence of small POSTs, which this table accumulates.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS media_assets (
+  id             TEXT PRIMARY KEY,
+  owner_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  filename       TEXT NOT NULL,
+  mime           TEXT NOT NULL,
+  size_bytes     INTEGER NOT NULL,       -- declared size, checked against actual on finish
+  data           BLOB NOT NULL DEFAULT x'',  -- raw bytes, appended chunk by chunk
+  chunks_received INTEGER NOT NULL DEFAULT 0,
+  chunks_total    INTEGER NOT NULL,
+  status         TEXT NOT NULL DEFAULT 'uploading'
+                 CHECK (status IN ('uploading','complete','abandoned')),
+  created_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_media_owner  ON media_assets(owner_id);
+CREATE INDEX IF NOT EXISTS idx_media_status ON media_assets(status);

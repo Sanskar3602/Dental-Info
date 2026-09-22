@@ -156,3 +156,23 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 );
 CREATE INDEX IF NOT EXISTS idx_attempts_email ON login_attempts(email, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_attempts_ip    ON login_attempts(ip, created_at DESC);
+
+-- ============================================================
+-- Media uploads (see MEDIA.md). Chunked because Vercel serverless
+-- functions cap a single request body well under 50MB.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS media_assets (
+  id             TEXT PRIMARY KEY,
+  owner_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  filename       TEXT NOT NULL,
+  mime           TEXT NOT NULL,
+  size_bytes     INTEGER NOT NULL,
+  data           BYTEA NOT NULL DEFAULT '',  -- raw bytes, appended chunk by chunk
+  chunks_received INTEGER NOT NULL DEFAULT 0,
+  chunks_total    INTEGER NOT NULL,
+  status         TEXT NOT NULL DEFAULT 'uploading'
+                 CHECK (status IN ('uploading','complete','abandoned')),
+  created_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_media_owner  ON media_assets(owner_id);
+CREATE INDEX IF NOT EXISTS idx_media_status ON media_assets(status);

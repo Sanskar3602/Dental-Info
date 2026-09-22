@@ -89,6 +89,11 @@ const API = {
   updatePost:(id, data)  => API.call("PUT", "/api/posts/" + encodeURIComponent(id), data),
   deletePost:(id)        => API.call("DELETE", "/api/posts/" + encodeURIComponent(id)),
 
+  mediaStart:(f, m, sz)  => API.call("POST", "/api/media/start",
+                                     { filename: f, mime: m, size_bytes: sz }),
+  mediaChunk:(id, i, b64)=> API.call("POST", "/api/media/chunk",
+                                     { id, index: i, data_base64: b64 }),
+
   signup:    (data)      => API.call("POST", "/api/signup", data),
   myRequest: ()          => API.call("GET", "/api/verification"),
   submitLicense:(data)   => API.call("POST", "/api/verification", data),
@@ -103,6 +108,50 @@ async function refresh({ session = true, posts = true } = {}) {
   if (session) jobs.push(API.me().then((r) => { SESSION = r.user; }));
   if (posts)   jobs.push(API.posts().then((r) => { CASES = r.posts; }));
   await Promise.all(jobs);
+}
+
+/* ── Media upload ────────────────────────────────────────────
+   Mirrors the server exactly: a single file caps at 4 MB (must be served
+   back whole in one response, and Vercel hard-caps a Serverless Function
+   response at 4.5 MB — vercel.com/docs/functions/limitations), a case
+   caps at 50 MB total (sized against the Neon plan's 0.5 GB budget).
+   Files upload in chunks sized to a multiple of 3 bytes, so independently
+   base64-encoded chunks concatenate into valid base64 without re-encoding
+   a growing buffer on every request. */
+const MAX_FILE_MB = 4;
+const MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024;
+const MAX_POST_MEDIA_MB = 50;
+const MAX_POST_MEDIA_BYTES = MAX_POST_MEDIA_MB * 1024 * 1024;
+// chunk size itself comes from the server's /api/media/start response, so
+// there's nothing to duplicate here beyond the two caps above.
+
+function bufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const step = 0x8000; // avoid a call-stack blowup from one huge fromCharCode call
+  for (let i = 0; i < bytes.length; i += step) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+  }
+  return btoa(binary);
+}
+
+async function uploadFileChunked(file, onProgress) {
+  if (!file.type.startsWith("image/")) {
+    throw new Error(`${file.name}: only images are supported right now`);
+  }
+  if (file.size > MAX_FILE_BYTES) {
+    throw new Error(`${file.name} is ${(file.size / 1024 / 1024).toFixed(1)} MB — ` +
+                    `each file must be under ${MAX_FILE_MB} MB`);
+  }
+  const { id, chunk_size } = await API.mediaStart(file.name, file.type, file.size);
+  const total = Math.ceil(file.size / chunk_size);
+  for (let i = 0; i < total; i++) {
+    const slice = file.slice(i * chunk_size, (i + 1) * chunk_size);
+    const buf = await slice.arrayBuffer();
+    await API.mediaChunk(id, i, bufferToBase64(buf));
+    if (onProgress) onProgress((i + 1) / total);
+  }
+  return { id, filename: file.name, mime: file.type, size_bytes: file.size };
 }
 
 /* ── Tiny helpers ────────────────────────────────────────── */
@@ -173,6 +222,51 @@ function diffMeter(level) {
 
 /* computed on demand — CASES is loaded from the API after boot */
 const allTools = () => [...new Set(CASES.flatMap((c) => c.tools || []))].sort();
+
+/* A media item is either our own upload (url starts with /api/media/, no
+   attribution needed) or an external reference used for demo content
+   (Wikimedia etc — carries a `credit` string that CC-BY-SA requires us to
+   display, not just log). Video is modelled but not uploadable yet, so it
+   still renders as the icon placeholder. */
+function mediaTile(m) {
+  const isImage = m.url && (m.mime || "").startsWith("image/");
+  if (!isImage) {
+    return `<div class="media-item">
+      <span class="badge">${esc(m.type || "file")}</span>
+      ${m.type === "video" ? ICON.video : ICON.image}
+      <span>${esc(m.label || "Untitled")}</span>
+    </div>`;
+  }
+  return `<button type="button" class="media-tile" data-lightbox="${esc(m.url)}"
+            data-caption="${esc(m.label || "")}" data-credit="${esc(m.credit || "")}">
+      <img src="${esc(m.url)}" alt="${esc(m.label || "")}" loading="lazy">
+      ${m.credit ? `<span class="media-credit">${esc(m.credit)}</span>` : ""}
+    </button>`;
+}
+
+/* One delegated listener handles every lightbox trigger on the page,
+   since case detail re-renders the media grid on every navigation. */
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-lightbox]");
+  if (!t) return;
+  const box = el(`<div class="lightbox" role="dialog" aria-modal="true">
+    <button class="lightbox-close" aria-label="Close">${ICON.left}</button>
+    <figure>
+      <img src="${esc(t.dataset.lightbox)}" alt="${esc(t.dataset.caption)}">
+      <figcaption>
+        ${t.dataset.caption ? `<span>${esc(t.dataset.caption)}</span>` : ""}
+        ${t.dataset.credit ? `<span class="lb-credit">${esc(t.dataset.credit)}</span>` : ""}
+      </figcaption>
+    </figure>
+  </div>`);
+  const close = () => box.remove();
+  box.addEventListener("click", (ev) => { if (ev.target === box) close(); });
+  $(".lightbox-close", box).onclick = close;
+  document.addEventListener("keydown", function esc1(ev) {
+    if (ev.key === "Escape") { close(); document.removeEventListener("keydown", esc1); }
+  });
+  document.body.appendChild(box);
+});
 
 /* ── Filtering ───────────────────────────────────────────── */
 function procLabel(id) {
@@ -441,9 +535,7 @@ function renderCase(id) {
         </div>
         ${(c.media || []).length ? `<div class="section">
           <p class="section-label">Media (${c.media.length})</p>
-          <div class="media-grid">${(c.media || []).map((m) => `<div class="media-item">
-            <span class="badge">${m.type}</span>${m.type === "video" ? ICON.video : ICON.image}<span>${esc(m.label)}</span>
-          </div>`).join("")}</div>
+          <div class="media-grid">${(c.media || []).map((m) => mediaTile(m)).join("")}</div>
         </div>` : ""}
 
         <div class="section">
@@ -652,11 +744,16 @@ function renderContribute(editing) {
         <textarea id="f-out" style="min-height:76px" placeholder="Review interval and what you found.">${editing ? esc(editing.outcome || "") : ""}</textarea>
       </div>
       <div class="field">
-        <label>Supporting media</label>
-        <div class="dropzone">${ICON.upload}
-          <div>Drop radiographs, clinical photos or video here</div>
-          <div class="hint" style="margin-top:6px">Faces and identifiers are auto-flagged before publishing</div>
-        </div>
+        <label>Supporting media <span class="opt">optional</span></label>
+        <label class="dropzone" for="f-media-input" id="dropzone">${ICON.upload}
+          <div>Click to choose photos, or drop them here</div>
+          <div class="hint" style="margin-top:6px">
+            Images only for now, up to 4&nbsp;MB each, ${MAX_POST_MEDIA_MB}&nbsp;MB total per case.
+            Faces and identifiers are your responsibility to crop before uploading — there is no
+            automatic redaction yet.</div>
+        </label>
+        <input id="f-media-input" type="file" accept="image/*" multiple hidden>
+        <div id="mediaList" class="media-pending"></div>
       </div>
       <div class="form-actions">
         ${editing
@@ -704,6 +801,90 @@ function renderContribute(editing) {
   const draftBtn = $("#saveDraft", view);
   if (draftBtn) draftBtn.onclick = () => toast("Draft saving is not wired up yet");
 
+  /* ── media state ──────────────────────────────────────────
+     `media` holds every item that will be submitted: existing items kept
+     from an edit (external links or prior uploads, untouched) plus newly
+     uploaded ones. Each entry gets a client-side `_key` so it can be
+     removed from the list before it necessarily has a real url (mid-upload). */
+  let media = editing ? (editing.media || []).map((m) => ({ ...m, _key: crypto.randomUUID() }))
+                      : [];
+  const mediaListEl = $("#mediaList", view);
+  const currentTotal = () => media.reduce((n, m) => n + (m.size_bytes || 0), 0);
+
+  function renderMediaList() {
+    mediaListEl.innerHTML = "";
+    media.forEach((m) => {
+      const row = el(`<div class="media-pending-item ${m._uploading ? "is-uploading" : ""}">
+        ${m.url && (m.mime || "").startsWith("image/")
+          ? `<img src="${esc(m.url)}" alt="">`
+          : `<span class="mp-icon">${ICON.image}</span>`}
+        <div class="mp-meta">
+          <span class="mp-name">${esc(m.label || m.filename || "Untitled")}</span>
+          <span class="mp-size">${m._uploading
+            ? `Uploading… ${Math.round((m._progress || 0) * 100)}%`
+            : m.external ? "External link"
+            : `${((m.size_bytes || 0) / 1024 / 1024).toFixed(1)} MB`}</span>
+          ${m._uploading ? `<div class="mp-bar"><i style="width:${Math.round((m._progress || 0) * 100)}%"></i></div>` : ""}
+        </div>
+        <button type="button" class="mp-remove" aria-label="Remove" ${m._uploading ? "disabled" : ""}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>`);
+      $(".mp-remove", row).onclick = () => {
+        media = media.filter((x) => x._key !== m._key);
+        renderMediaList();
+      };
+      mediaListEl.appendChild(row);
+    });
+    const total = currentTotal();
+    if (total > 0) {
+      mediaListEl.appendChild(el(`<div class="mp-total ${total > MAX_POST_MEDIA_BYTES ? "over" : ""}">
+        ${(total / 1024 / 1024).toFixed(1)} MB of ${MAX_POST_MEDIA_MB} MB used
+      </div>`));
+    }
+  }
+  renderMediaList();
+
+  async function handleFiles(fileList) {
+    const files = Array.from(fileList);
+    for (const file of files) {
+      if (currentTotal() + file.size > MAX_POST_MEDIA_BYTES) {
+        toast(`Skipped ${file.name} — would exceed the ${MAX_POST_MEDIA_MB} MB per-case limit`);
+        continue;
+      }
+      const pending = { _key: crypto.randomUUID(), _uploading: true, _progress: 0,
+                        label: file.name, filename: file.name, mime: file.type,
+                        size_bytes: file.size, type: "image" };
+      media.push(pending);
+      renderMediaList();
+      try {
+        const result = await uploadFileChunked(file, (p) => {
+          pending._progress = p;
+          renderMediaList();
+        });
+        pending._uploading = false;
+        pending.url = "/api/media/" + result.id;
+      } catch (err) {
+        media = media.filter((x) => x._key !== pending._key);
+        toast(err.message);
+      }
+      renderMediaList();
+    }
+  }
+
+  const fileInput = $("#f-media-input", view);
+  fileInput.onchange = () => { handleFiles(fileInput.files); fileInput.value = ""; };
+  const dz = $("#dropzone", view);
+  ["dragenter", "dragover"].forEach((ev) => dz.addEventListener(ev, (e) => {
+    e.preventDefault(); dz.classList.add("drag");
+  }));
+  ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => {
+    e.preventDefault(); dz.classList.remove("drag");
+  }));
+  dz.addEventListener("drop", (e) => {
+    if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+  });
+
   $("#caseForm", view).onsubmit = async (e) => {
     e.preventDefault();
 
@@ -714,6 +895,7 @@ function renderContribute(editing) {
 
     if (!val("f-title")) { toast("A title is required"); return; }
     if (!procLeaf)       { toast("Choose a procedure type"); return; }
+    if (media.some((m) => m._uploading)) { toast("Wait for uploads to finish"); return; }
 
     // build the display path: "Group › Leaf", or "Proposed › <write-in>"
     let path = procLeaf;
@@ -734,7 +916,7 @@ function renderContribute(editing) {
       tools: val("f-tools").split(",").map((s) => s.trim()).filter(Boolean),
       resolution: lines("f-res"),
       takeaways: [],
-      media: [],
+      media: media.map(({ _key, _uploading, _progress, ...m }) => m),
       presentation: val("f-pres"),
       unusual: val("f-unusual"),
       outcome: val("f-out"),

@@ -13,6 +13,7 @@ deployment answers with a JSON explanation instead of crashing. Hit
 Local development does NOT use this file — run server/app.py (SQLite) instead.
 """
 
+import base64
 import hashlib
 import json
 import os
@@ -50,6 +51,26 @@ PERMISSIVE_MODE = os.environ.get("DENTAL_INFO_PERMISSIVE", "") in ("1", "true", 
 SESSION_TTL = timedelta(days=7)
 PBKDF2_ITERATIONS = 240_000
 JSON_FIELDS = ("complications", "tools", "resolution", "takeaways", "media")
+
+# Media limits. Both numbers exist because of one Vercel constraint: a
+# Serverless Function request/response body is hard-capped at 4.5 MB in
+# both directions (https://vercel.com/docs/functions/limitations). A
+# single file must fit that on the way OUT (we serve it whole), so it is
+# capped well under it; MAX_POST_MEDIA_BYTES is the total per post the
+# user sized against their Neon plan's 0.5 GB storage budget.
+MAX_FILE_BYTES = 4 * 1024 * 1024          # 4 MiB per file
+MAX_POST_MEDIA_BYTES = 50 * 1024 * 1024   # 50 MiB per post
+CHUNK_RAW_BYTES = 2_097_150               # multiple of 3 -> clean base64 joins
+ALLOWED_MIME_PREFIXES = ("image/",)       # video deliberately excluded for now:
+                                          # a usable clip will not fit 4 MiB
+
+
+def media_asset_out(row):
+    return {
+        "id": row["id"], "filename": row["filename"], "mime": row["mime"],
+        "size_bytes": row["size_bytes"], "status": row["status"],
+    }
+
 
 ROLE_GRANTS = {
     "admin": {"post.create", "post.delete_own", "post.delete_any",
@@ -360,6 +381,34 @@ REGISTRIES = {
 }
 
 
+def validate_media(cur, owner_id, media_list):
+    """Returns an error string, or None when the media list is acceptable."""
+    if not isinstance(media_list, list):
+        return "media must be a list"
+    total = 0
+    for item in media_list:
+        if not isinstance(item, dict):
+            return "Each media item must be an object"
+        url = item.get("url") or ""
+        if not url.startswith("/api/media/"):
+            continue   # an external link -- not ours to check or charge for
+        aid = url.rsplit("/", 1)[-1]
+        cur.execute("SELECT owner_id, status, size_bytes FROM media_assets "
+                    "WHERE id = %s", (aid,))
+        asset = cur.fetchone()
+        if not asset:
+            return "One of the attached files no longer exists"
+        if asset["owner_id"] != owner_id:
+            return "You can only attach your own uploads"
+        if asset["status"] != "complete":
+            return "One of the attached files did not finish uploading"
+        total += asset["size_bytes"]
+    if total > MAX_POST_MEDIA_BYTES:
+        return ("Attached media totals %.1f MB, over the %d MB limit per case"
+                % (total / (1024 * 1024), MAX_POST_MEDIA_BYTES // (1024 * 1024)))
+    return None
+
+
 def registry_check(country):
     key = (country or "").strip().lower()
     who = REGISTRIES.get(key)
@@ -611,6 +660,121 @@ def app(environ, start_response):
                                  cookie=[_cookie(token, environ),
                                          _csrf_cookie(csrf, environ)])
 
+                # -- media: start an upload ---------------------------------
+                if path == "/api/media/start":
+                    if method != "POST":
+                        return _err(start_response, 405, "Use POST")
+                    if me is None:
+                        return _err(start_response, 401, "Not signed in")
+                    if not can(me, "post.create"):
+                        return _err(start_response, 403,
+                                    "Only verified contributors can upload media")
+                    body = _body(environ)
+                    if body is None:
+                        return _err(start_response, 400, "Body must be valid JSON")
+                    filename = (body.get("filename") or "upload").strip()[:200]
+                    mime = (body.get("mime") or "").strip().lower()
+                    try:
+                        size = int(body.get("size_bytes") or 0)
+                    except (TypeError, ValueError):
+                        return _err(start_response, 400, "size_bytes must be a number")
+                    if not any(mime.startswith(p) for p in ALLOWED_MIME_PREFIXES):
+                        return _err(start_response, 400,
+                                    "Only image uploads are supported right now")
+                    if size <= 0 or size > MAX_FILE_BYTES:
+                        return _err(start_response, 400,
+                                    "Each file must be under %d MB"
+                                    % (MAX_FILE_BYTES // (1024 * 1024)))
+                    aid = new_id()
+                    chunks_total = (size + CHUNK_RAW_BYTES - 1) // CHUNK_RAW_BYTES
+                    cur.execute(
+                        """INSERT INTO media_assets
+                             (id,owner_id,filename,mime,size_bytes,data,
+                              chunks_received,chunks_total,status,created_at)
+                           VALUES (%s,%s,%s,%s,%s,''::bytea,0,%s,'uploading',%s)""",
+                        (aid, me["id"], filename, mime, size, chunks_total, now_iso()))
+                    return _json(start_response, {
+                        "id": aid, "chunk_size": CHUNK_RAW_BYTES,
+                        "chunks_total": chunks_total,
+                    }, 201)
+
+                # -- media: send one chunk -----------------------------------
+                if path == "/api/media/chunk":
+                    if method != "POST":
+                        return _err(start_response, 405, "Use POST")
+                    if me is None:
+                        return _err(start_response, 401, "Not signed in")
+                    body = _body(environ)
+                    if body is None:
+                        return _err(start_response, 400, "Body must be valid JSON")
+                    aid = (body.get("id") or "").strip()
+                    try:
+                        index = int(body.get("index"))
+                    except (TypeError, ValueError):
+                        return _err(start_response, 400, "index must be a number")
+                    b64 = body.get("data_base64") or ""
+
+                    cur.execute("SELECT * FROM media_assets WHERE id = %s", (aid,))
+                    asset = cur.fetchone()
+                    if not asset:
+                        return _err(start_response, 404, "Upload not found")
+                    if asset["owner_id"] != me["id"]:
+                        return _err(start_response, 403, "Not your upload")
+                    if asset["status"] != "uploading":
+                        return _err(start_response, 409,
+                                    "This upload is already %s" % asset["status"])
+                    if index != asset["chunks_received"]:
+                        return _err(start_response, 409,
+                                    "Expected chunk %d, got %d (chunks must arrive in order)"
+                                    % (asset["chunks_received"], index))
+                    try:
+                        raw = base64.b64decode(b64, validate=True)
+                    except Exception:
+                        return _err(start_response, 400, "Invalid base64 chunk")
+
+                    received = asset["chunks_received"] + 1
+                    cur.execute(
+                        "UPDATE media_assets SET data = data || %s::bytea, "
+                        "chunks_received = %s WHERE id = %s",
+                        (raw, received, aid))
+
+                    if received >= asset["chunks_total"]:
+                        cur.execute("SELECT octet_length(data) AS n FROM media_assets "
+                                    "WHERE id = %s", (aid,))
+                        actual = cur.fetchone()["n"]
+                        if actual != asset["size_bytes"]:
+                            cur.execute("UPDATE media_assets SET status='abandoned' "
+                                        "WHERE id = %s", (aid,))
+                            return _err(start_response, 400,
+                                        "Upload corrupted in transit (got %d bytes, "
+                                        "expected %d). Try again." % (actual, asset["size_bytes"]))
+                        cur.execute("UPDATE media_assets SET status='complete' "
+                                    "WHERE id = %s", (aid,))
+                        audit(cur, me["id"], "media.upload", aid, asset["filename"])
+                        return _json(start_response, {"done": True, "id": aid})
+
+                    return _json(start_response,
+                                 {"done": False, "chunks_received": received})
+
+                # -- media: fetch a file --------------------------------------
+                if path.startswith("/api/media/") and not path.endswith(("/start", "/chunk")):
+                    if method != "GET":
+                        return _err(start_response, 405, "Use GET")
+                    aid = path.rsplit("/", 1)[-1]
+                    cur.execute("SELECT * FROM media_assets WHERE id = %s AND "
+                                "status = 'complete'", (aid,))
+                    asset = cur.fetchone()
+                    if not asset:
+                        return _err(start_response, 404, "Not found")
+                    data = bytes(asset["data"])
+                    start_response("200 OK", [
+                        ("Content-Type", asset["mime"]),
+                        ("Content-Length", str(len(data))),
+                        # content-addressed by a uuid -> never changes -> cache forever
+                        ("Cache-Control", "public, max-age=31536000, immutable"),
+                    ])
+                    return [data]
+
                 # -- verification: submit / read own status -----------------
                 if path == "/api/verification":
                     if me is None:
@@ -759,6 +923,9 @@ def app(environ, start_response):
                             return _err(start_response, 400, "A procedure type is required")
                         if body.get("difficulty") not in (None, "Low", "Medium", "High"):
                             return _err(start_response, 400, "Invalid difficulty")
+                        media_problem = validate_media(cur, me["id"], body.get("media") or [])
+                        if media_problem:
+                            return _err(start_response, 400, media_problem)
 
                         pid = body.get("id") or new_id()
                         ts = now_iso()
@@ -820,6 +987,10 @@ def app(environ, start_response):
                             return _err(start_response, 400, "A procedure type is required")
                         if body.get("difficulty") not in (None, "Low", "Medium", "High"):
                             return _err(start_response, 400, "Invalid difficulty")
+                        if "media" in body:
+                            media_problem = validate_media(cur, me["id"], body.get("media") or [])
+                            if media_problem:
+                                return _err(start_response, 400, media_problem)
 
                         # Only touch what was sent, so a partial edit cannot
                         # silently blank fields the form did not include.

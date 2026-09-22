@@ -60,9 +60,17 @@ and the placeholder style (`?` → `%s`).
 | GET | `/api/posts` | published cases (admins also see drafts) |
 | GET | `/api/posts/:id` | one case |
 | POST | `/api/posts` | create — needs `post.create` |
+| PUT | `/api/posts/:id` | edit — own case, or any case for an admin |
 | DELETE | `/api/posts/:id` | delete — own case, or any case for an admin |
+| POST | `/api/media/start` | begin an upload — `{filename, mime, size_bytes}`, 4 MB/file cap |
+| POST | `/api/media/chunk` | send one chunk — `{id, index, data_base64}`, in order |
+| GET | `/api/media/:id` | fetch a completed upload |
 | GET | `/api/users` | admin only |
 | GET | `/api/audit` | admin only |
+
+See `MEDIA.md` at the repo root for why uploads are chunked, why the two size
+limits (4 MB/file, 50 MB/case) are what they are, and a SQLite blob-concat bug
+it surfaced.
 
 ## Permissions
 

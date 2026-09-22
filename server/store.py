@@ -44,6 +44,99 @@ PBKDF2_ITERATIONS = 240_000
 
 JSON_FIELDS = ("complications", "tools", "resolution", "takeaways", "media")
 
+# Same limits as the deployed API, for the same reason: Vercel's own
+# Serverless Functions cap a request/response body at 4.5 MB in both
+# directions, so a single served file has to fit comfortably under that.
+# MAX_POST_MEDIA_BYTES is the total per post, sized against the Neon plan's
+# 0.5 GB storage budget -- see MEDIA.md.
+MAX_FILE_BYTES = 4 * 1024 * 1024
+MAX_POST_MEDIA_BYTES = 50 * 1024 * 1024
+CHUNK_RAW_BYTES = 2_097_150
+ALLOWED_MIME_PREFIXES = ("image/",)
+
+
+def start_upload(conn, owner_id, filename, mime, size_bytes):
+    if not any(mime.startswith(p) for p in ALLOWED_MIME_PREFIXES):
+        return None, "Only image uploads are supported right now"
+    if size_bytes <= 0 or size_bytes > MAX_FILE_BYTES:
+        return None, f"Each file must be under {MAX_FILE_BYTES // (1024*1024)} MB"
+    aid = new_id()
+    chunks_total = (size_bytes + CHUNK_RAW_BYTES - 1) // CHUNK_RAW_BYTES
+    conn.execute(
+        """INSERT INTO media_assets
+             (id,owner_id,filename,mime,size_bytes,data,
+              chunks_received,chunks_total,status,created_at)
+           VALUES (?,?,?,?,?,x'',0,?,'uploading',?)""",
+        (aid, owner_id, filename[:200], mime, size_bytes, chunks_total, now_iso()))
+    return {"id": aid, "chunk_size": CHUNK_RAW_BYTES, "chunks_total": chunks_total}, None
+
+
+def get_asset(conn, aid):
+    return conn.execute("SELECT * FROM media_assets WHERE id = ?", (aid,)).fetchone()
+
+
+def append_chunk(conn, aid, owner_id, index, raw_bytes):
+    """Returns (result_dict, error_str). Exactly one is not None."""
+    asset = get_asset(conn, aid)
+    if not asset:
+        return None, "Upload not found"
+    if asset["owner_id"] != owner_id:
+        return None, "Not your upload"
+    if asset["status"] != "uploading":
+        return None, f"This upload is already {asset['status']}"
+    if index != asset["chunks_received"]:
+        return None, (f"Expected chunk {asset['chunks_received']}, got {index} "
+                      "(chunks must arrive in order)")
+
+    # SQLite's `||` operator on BLOB columns silently corrupts large binary
+    # parameters (confirmed by direct repro: a 2 MiB blob concatenated via
+    # `data || ?` came back as 208 bytes, while a plain bound INSERT/UPDATE
+    # with the same bytes stored correctly). Concatenate in Python instead.
+    received = asset["chunks_received"] + 1
+    grown = bytes(asset["data"]) + raw_bytes
+    conn.execute("UPDATE media_assets SET data = ?, chunks_received = ? "
+                "WHERE id = ?", (grown, received, aid))
+
+    if received >= asset["chunks_total"]:
+        actual = conn.execute("SELECT length(data) n FROM media_assets WHERE id = ?",
+                              (aid,)).fetchone()["n"]
+        if actual != asset["size_bytes"]:
+            conn.execute("UPDATE media_assets SET status='abandoned' WHERE id = ?", (aid,))
+            return None, (f"Upload corrupted in transit (got {actual} bytes, "
+                          f"expected {asset['size_bytes']}). Try again.")
+        conn.execute("UPDATE media_assets SET status='complete' WHERE id = ?", (aid,))
+        return {"done": True, "id": aid}, None
+
+    return {"done": False, "chunks_received": received}, None
+
+
+def validate_media(conn, owner_id, media_list):
+    """Returns an error string, or None. External links are not counted or
+    checked -- only our own /api/media/<id> references cost budget."""
+    if not isinstance(media_list, list):
+        return "media must be a list"
+    total = 0
+    for item in media_list:
+        if not isinstance(item, dict):
+            return "Each media item must be an object"
+        url = item.get("url") or ""
+        if not url.startswith("/api/media/"):
+            continue
+        aid = url.rsplit("/", 1)[-1]
+        asset = get_asset(conn, aid)
+        if not asset:
+            return "One of the attached files no longer exists"
+        if asset["owner_id"] != owner_id:
+            return "You can only attach your own uploads"
+        if asset["status"] != "complete":
+            return "One of the attached files did not finish uploading"
+        total += asset["size_bytes"]
+    if total > MAX_POST_MEDIA_BYTES:
+        return (f"Attached media totals {total/(1024*1024):.1f} MB, over the "
+               f"{MAX_POST_MEDIA_BYTES // (1024*1024)} MB limit per case")
+    return None
+
+
 
 # ── helpers ────────────────────────────────────────────────────────────────
 def now_iso() -> str:

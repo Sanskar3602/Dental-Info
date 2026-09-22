@@ -41,7 +41,12 @@
   "media": [
    {
     "type": "image",
-    "label": "Pre-op PA radiograph"
+    "label": "Periapical radiograph (representative image)",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/2/2d/Abscessed_tooth_periapical_radiograph.jpg",
+    "mime": "image/jpeg",
+    "size_bytes": 992715,
+    "external": true,
+    "credit": "Coronation Dental Specialty Group — CC BY-SA 3.0, via Wikimedia Commons"
    },
    {
     "type": "image",
@@ -114,7 +119,12 @@
   "media": [
    {
     "type": "image",
-    "label": "CBCT axial — antral septum"
+    "label": "Sinus lift with implant placement (representative image)",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/b/bc/Straumann_implant_sinus-lift.jpg",
+    "mime": "image/jpeg",
+    "size_bytes": 44696,
+    "external": true,
+    "credit": "DRosenbach — CC BY-SA 3.0, via Wikimedia Commons"
    },
    {
     "type": "image",
@@ -177,7 +187,12 @@
   "media": [
    {
     "type": "image",
-    "label": "CBCT axial — untreated MB2"
+    "label": "Periapical radiograph (representative image)",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/e/ef/Dental_X-ray122.JPG",
+    "mime": "image/jpeg",
+    "size_bytes": 552110,
+    "external": true,
+    "credit": "Werneuchen — Public domain, via Wikimedia Commons"
    },
    {
     "type": "image",
@@ -227,7 +242,12 @@
   "media": [
    {
     "type": "image",
-    "label": "CBCT — 0.6 mm buccal plate"
+    "label": "Extracted tooth (representative image)",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/d/da/Extracted_Wisdom_Tooth.jpg",
+    "mime": "image/jpeg",
+    "size_bytes": 286763,
+    "external": true,
+    "credit": "David M. Jensen — CC BY-SA 3.0, via Wikimedia Commons"
    },
    {
     "type": "image",
@@ -277,7 +297,12 @@
   "media": [
    {
     "type": "image",
-    "label": "Pre-op PA radiograph"
+    "label": "Panoramic radiograph (representative image)",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/5/5c/Basic_panoramic_radiograph.jpg",
+    "mime": "image/jpeg",
+    "size_bytes": 328462,
+    "external": true,
+    "credit": "Coronation Dental Specialty Group — CC BY 3.0, via Wikimedia Commons"
    }
   ],
   "comments": [
@@ -331,7 +356,12 @@
   "media": [
    {
     "type": "image",
-    "label": "Baseline radiograph"
+    "label": "Implant radiograph (representative image)",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/8/80/Dental_surgery_xray.png",
+    "mime": "image/png",
+    "size_bytes": 538404,
+    "external": true,
+    "credit": "Racrat30 — CC BY-SA 4.0, via Wikimedia Commons"
    },
    {
     "type": "image",
@@ -384,7 +414,12 @@
   "media": [
    {
     "type": "image",
-    "label": "Sensory mapping diagram"
+    "label": "Panoramic radiograph showing an impacted third molar (representative image)",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/a/ae/Asymptomatic_disease_free_impacted_wisdom_teeth.jpg",
+    "mime": "image/jpeg",
+    "size_bytes": 1727847,
+    "external": true,
+    "credit": "Coronation Dental Specialty Group — CC BY-SA 3.0, via Wikimedia Commons"
    }
   ],
   "comments": []
@@ -427,7 +462,17 @@
    "Repeated failure on the same teeth is nearly always a technique or isolation variable, not the material.",
    "Rubber dam for attachment bonding costs three minutes and removes the most common failure cause."
   ],
-  "media": [],
+  "media": [
+   {
+    "type": "image",
+    "label": "Clear aligner (representative image)",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/c/c3/Invisalign_aligner.jpg",
+    "mime": "image/jpeg",
+    "size_bytes": 152060,
+    "external": true,
+    "credit": "Smikey Io — CC BY-SA 3.0, via Wikimedia Commons"
+   }
+  ],
   "comments": []
  }
 ]

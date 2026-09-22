@@ -13,6 +13,7 @@ server/README.md for what changes when you deploy.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import secrets
@@ -198,6 +199,20 @@ class Handler(SimpleHTTPRequestHandler):
                     return self._error(HTTPStatus.NOT_FOUND, "Case not found")
                 return self._send_json({"post": post})
 
+            if path.startswith("/api/media/"):
+                aid = path.rsplit("/", 1)[-1]
+                asset = store.get_asset(conn, aid)
+                if not asset or asset["status"] != "complete":
+                    return self._error(HTTPStatus.NOT_FOUND, "Not found")
+                data = asset["data"]
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", asset["mime"])
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+                self.end_headers()
+                self.wfile.write(data)
+                return
+
             if path == "/api/verification":
                 user = self._require_user(conn)
                 if user is None:
@@ -271,6 +286,50 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._send_json({"ok": True}, cookie=[
                     f"{COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
                     f"{CSRF_COOKIE}=; Path=/; SameSite=Lax; Max-Age=0"])
+
+            if path == "/api/media/start":
+                user = self._require_user(conn)
+                if user is None:
+                    return
+                if not store.can(user, "post.create"):
+                    return self._error(HTTPStatus.FORBIDDEN,
+                                       "Only verified contributors can upload media")
+                filename = (body.get("filename") or "upload").strip()
+                mime = (body.get("mime") or "").strip().lower()
+                try:
+                    size = int(body.get("size_bytes") or 0)
+                except (TypeError, ValueError):
+                    return self._error(HTTPStatus.BAD_REQUEST, "size_bytes must be a number")
+                out, err = store.start_upload(conn, user["id"], filename, mime, size)
+                if err:
+                    return self._error(HTTPStatus.BAD_REQUEST, err)
+                return self._send_json(out, status=HTTPStatus.CREATED)
+
+            if path == "/api/media/chunk":
+                user = self._require_user(conn)
+                if user is None:
+                    return
+                aid = (body.get("id") or "").strip()
+                try:
+                    index = int(body.get("index"))
+                except (TypeError, ValueError):
+                    return self._error(HTTPStatus.BAD_REQUEST, "index must be a number")
+                try:
+                    raw = base64.b64decode(body.get("data_base64") or "", validate=True)
+                except Exception:
+                    return self._error(HTTPStatus.BAD_REQUEST, "Invalid base64 chunk")
+                out, err = store.append_chunk(conn, aid, user["id"], index, raw)
+                if err:
+                    code = (HTTPStatus.NOT_FOUND if "not found" in err.lower()
+                            else HTTPStatus.FORBIDDEN if "not your" in err.lower()
+                            else HTTPStatus.CONFLICT if "already" in err.lower()
+                                 or "order" in err.lower()
+                            else HTTPStatus.BAD_REQUEST)
+                    return self._error(code, err)
+                if out.get("done"):
+                    store.audit(conn, actor_id=user["id"], action="media.upload",
+                                target=aid)
+                return self._send_json(out)
 
             if path == "/api/signup":
                 if store.signup_limited(conn, self._client_ip()):
@@ -368,6 +427,9 @@ class Handler(SimpleHTTPRequestHandler):
                                        "A procedure type is required")
                 if body.get("difficulty") not in (None, "Low", "Medium", "High"):
                     return self._error(HTTPStatus.BAD_REQUEST, "Invalid difficulty")
+                media_problem = store.validate_media(conn, user["id"], body.get("media") or [])
+                if media_problem:
+                    return self._error(HTTPStatus.BAD_REQUEST, media_problem)
                 pid = store.create_post(conn, author_id=user["id"], data=body)
                 store.audit(conn, actor_id=user["id"], action="post.create",
                             target=pid, detail=title)
@@ -405,6 +467,10 @@ class Handler(SimpleHTTPRequestHandler):
                                        "A procedure type is required")
                 if body.get("difficulty") not in (None, "Low", "Medium", "High"):
                     return self._error(HTTPStatus.BAD_REQUEST, "Invalid difficulty")
+                if "media" in body:
+                    media_problem = store.validate_media(conn, user["id"], body.get("media") or [])
+                    if media_problem:
+                        return self._error(HTTPStatus.BAD_REQUEST, media_problem)
                 out = store.update_post(conn, post_id, body)
                 if out is None:
                     return self._error(HTTPStatus.BAD_REQUEST, "Nothing to update")
